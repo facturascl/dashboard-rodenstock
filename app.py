@@ -253,4 +253,4 @@ except Exception as e:
     st.info("Asegurate de que las credenciales de BigQuery esten configuradas correctamente.")
 
 st.markdown("---")
-st.caption("Dashboard desarrollado con Streamlit | Datos desde BigQuery | (c) 2025 Rodenstock")
+st.caption("Dashboard desarrollado por Cristián Ibañez | Datos desde BigQuery | (c) 2025 Rodenstock | (c) 2025 Ben & Frank")
