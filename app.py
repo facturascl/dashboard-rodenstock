@@ -42,20 +42,40 @@ def get_resumen_mensual(ano=None, mes=None):
     if mes is not None:
         filtros.append(f"EXTRACT(MONTH FROM f.fechaemision) = {mes}")
     where_clause = " AND ".join(filtros)
+    
     query = f"""
+    WITH datos AS (
+      SELECT
+        EXTRACT(YEAR FROM f.fechaemision) AS ano,
+        EXTRACT(MONTH FROM f.fechaemision) AS mes,
+        CONCAT(
+          COALESCE(lf.clasificacion_categoria, 'Sin Clasificar'),
+          ' - ',
+          COALESCE(lf.clasificacion_subcategoria, '')
+        ) AS categoria,
+        COUNT(DISTINCT lf.numerofactura) AS cantidad_trabajos,
+        SUM(CAST(lf.total_linea AS FLOAT64)) AS total_dinero
+      FROM `rodenstock-471300.facturacion.lineas_factura` lf
+      JOIN `rodenstock-471300.facturacion.facturas` f
+        ON lf.numerofactura = f.numerofactura
+      WHERE {where_clause}
+      GROUP BY ano, mes, categoria
+    ),
+    total_general AS (
+      SELECT SUM(cantidad_trabajos) AS total_trabajos
+      FROM datos
+    )
     SELECT
-      EXTRACT(YEAR FROM f.fechaemision) AS ano,
-      EXTRACT(MONTH FROM f.fechaemision) AS mes,
-      lf.descripcion AS producto,
-      COUNT(DISTINCT lf.numerofactura) AS cantidad_trabajos,
-      SUM(CAST(lf.total_linea AS FLOAT64)) AS total_dinero,
-      AVG(CAST(lf.total_linea AS FLOAT64)) AS promedio_trabajo
-    FROM `rodenstock-471300.facturacion.lineas_factura` lf
-    JOIN `rodenstock-471300.facturacion.facturas` f
-      ON lf.numerofactura = f.numerofactura
-    WHERE {where_clause}
-    GROUP BY ano, mes, producto
-    ORDER BY ano DESC, mes DESC, total_dinero DESC
+      d.ano,
+      d.mes,
+      d.categoria,
+      d.cantidad_trabajos,
+      d.total_dinero,
+      ROUND(d.total_dinero / d.cantidad_trabajos, 0) AS promedio_trabajo,
+      ROUND((d.cantidad_trabajos * 100.0) / tg.total_trabajos, 2) AS porcentaje
+    FROM datos d
+    CROSS JOIN total_general tg
+    ORDER BY d.ano DESC, d.mes DESC, d.total_dinero DESC
     """
     return client.query(query).to_dataframe()
 
@@ -67,14 +87,18 @@ def get_evolucion_mensual():
     query = """
     SELECT
       FORMAT_DATE('%Y-%m', f.fechaemision) AS mes,
-      lf.descripcion AS producto,
+      CONCAT(
+        COALESCE(lf.clasificacion_categoria, 'Sin Clasificar'),
+        ' - ',
+        COALESCE(lf.clasificacion_subcategoria, '')
+      ) AS categoria,
       COUNT(DISTINCT lf.numerofactura) AS cantidad_trabajos,
       SUM(CAST(lf.total_linea AS FLOAT64)) AS total_dinero
     FROM `rodenstock-471300.facturacion.lineas_factura` lf
     JOIN `rodenstock-471300.facturacion.facturas` f
       ON lf.numerofactura = f.numerofactura
     WHERE f.fechaemision IS NOT NULL
-    GROUP BY mes, producto
+    GROUP BY mes, categoria
     ORDER BY mes DESC
     """
     return client.query(query).to_dataframe()
@@ -154,16 +178,16 @@ try:
         if not df_resumen.empty:
             tab1, tab2, tab3 = st.tabs(["Distribucion", "Evolucion", "Detalle"])
             with tab1:
-                st.subheader("Distribucion por Producto")
+                st.subheader("Distribucion por Categoria")
                 col1, col2 = st.columns([2, 1])
                 with col1:
                     fig_barras = px.bar(
                         df_resumen.sort_values('total_dinero', ascending=False).head(15),
-                        x='producto',
+                        x='categoria',
                         y='cantidad_trabajos',
-                        color='producto',
-                        title='Top 15 Productos por Cantidad de Trabajos',
-                        labels={'cantidad_trabajos': 'Cantidad', 'producto': 'Producto'},
+                        color='categoria',
+                        title='Top 15 Categorias por Cantidad de Trabajos',
+                        labels={'cantidad_trabajos': 'Cantidad', 'categoria': 'Categoria'},
                         height=500
                     )
                     fig_barras.update_layout(showlegend=False, xaxis_tickangle=-45)
@@ -172,7 +196,7 @@ try:
                     fig_pie = px.pie(
                         df_resumen.head(10),
                         values='total_dinero',
-                        names='producto',
+                        names='categoria',
                         title='Distribucion de Ingresos (Top 10)',
                         height=500
                     )
@@ -186,7 +210,7 @@ try:
                         df_evolucion,
                         x='mes',
                         y='cantidad_trabajos',
-                        color='producto',
+                        color='categoria',
                         title='Evolucion de Trabajos por Mes',
                         labels={'cantidad_trabajos': 'Cantidad', 'mes': 'Mes'},
                         height=450,
@@ -197,7 +221,7 @@ try:
                         df_evolucion,
                         x='mes',
                         y='total_dinero',
-                        color='producto',
+                        color='categoria',
                         title='Evolucion de Ingresos por Mes',
                         labels={'total_dinero': 'Ingresos', 'mes': 'Mes'},
                         height=450
@@ -210,7 +234,8 @@ try:
                 df_display = df_resumen.copy()
                 df_display['total_dinero'] = df_display['total_dinero'].apply(lambda x: f"${x:,.0f}")
                 df_display['promedio_trabajo'] = df_display['promedio_trabajo'].apply(lambda x: f"${x:,.0f}")
-                df_display.columns = ['Año', 'Mes', 'Producto', 'Cantidad Trabajos', 'Total Ingresos', 'Promedio por Trabajo']
+                df_display['porcentaje'] = df_display['porcentaje'].apply(lambda x: f"{x:.2f}%")
+                df_display.columns = ['Año', 'Mes', 'Categoria', 'Cantidad Trabajos', 'Total Ingresos', 'Promedio por Trabajo', 'Porcentaje']
                 st.dataframe(df_display, use_container_width=True, height=600)
                 csv = df_resumen.to_csv(index=False).encode('utf-8')
                 st.download_button(
