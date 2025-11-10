@@ -1,0 +1,41 @@
+cd /Users/cristian.ibanez/Documents/Facturas/Perplexity
+
+cat > .gitignore << EOF
+# Credenciales (NUNCA subir)
+bigquery-credentials.json
+credentials.json
+token.json
+*.json
+!requirements.txt
+
+# Datos y outputs
+outputs/
+pdf_attachments/
+processed_messages.json
+recambio.json
+last_processed.txt
+environment.txt
+Migrar.txt
+libreria.xlsx
+*.log
+
+# Scripts de procesamiento (no necesarios para dashboard)
+20copy.py
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+
+# Google Cloud SDK
+Rodenstock/
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Mac
+.DS_Store
+EOF
