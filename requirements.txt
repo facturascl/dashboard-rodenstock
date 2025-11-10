@@ -5,4 +5,4 @@ google-cloud-bigquery==3.13.0
 google-auth==2.25.2
 db-dtypes==1.2.0
 pyarrow==14.0.1
-EOF
+
