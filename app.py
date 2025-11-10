@@ -94,10 +94,20 @@ categorias_seleccionadas = st.sidebar.multiselect(
 # Checkbox para incluir facturas sin clasificar
 incluir_sin_clasificar = st.sidebar.checkbox("Incluir facturas sin clasificar", value=False)
 
-# Construir filtro SQL
-filtro_fecha = f"EXTRACT(YEAR FROM f.fecha) = {año_seleccionado}"
+# Construir filtro SQL de manera segura
+filtro_fecha = f"EXTRACT(YEAR FROM ventas.fecha) = {año_seleccionado}"
 if meses[mes_seleccionado] is not None:
-    filtro_fecha += f" AND EXTRACT(MONTH FROM f.fecha) = {meses[mes_seleccionado]}"
+    filtro_fecha += f" AND EXTRACT(MONTH FROM ventas.fecha) = {meses[mes_seleccionado]}"
+
+# Construir filtro de categorías de manera segura
+if categorias_seleccionadas:
+    categorias_str = "', '".join(categorias_seleccionadas)
+    filtro_categorias = f"AND categorias.categoria IN ('{categorias_str}')"
+else:
+    filtro_categorias = ""
+
+if incluir_sin_clasificar:
+    filtro_categorias += " OR categorias.categoria IS NULL"
 
 # Query principal con porcentajes corregidos
 query_principal = f"""
@@ -119,8 +129,7 @@ ON
   ventas.categoria = categorias.categoria_original
 WHERE
   {filtro_fecha}
-  {f"AND categorias.categoria IN ({','.join([f'\\'{c}\\'' for c in categorias_seleccionadas])})" if categorias_seleccionadas else ""}
-  {f"OR categorias.categoria IS NULL" if incluir_sin_clasificar else ""}
+  {filtro_categorias}
 GROUP BY
   categorias.categoria
 ORDER BY
