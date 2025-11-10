@@ -4,382 +4,211 @@ import plotly.express as px
 import plotly.graph_objects as go
 from google.cloud import bigquery
 from google.oauth2 import service_account
-from datetime import datetime
-import os
+import json
 
-# ============ CONFIGURACIÓN DE PÁGINA ============
+# Configuración de la página
 st.set_page_config(
-    page_title="Dashboard Rodenstock",
+    page_title="Dashboard de Facturación Rodenstock",
     page_icon="📊",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    layout="wide"
 )
 
-# ============ FUNCIONES DE DATOS ============
+# Título del dashboard
+st.title("📊 Dashboard de Facturación Rodenstock")
 
+# Función para cargar credenciales y conectar a BigQuery
 @st.cache_resource
 def get_bigquery_client():
-    """Inicializa cliente BigQuery con credenciales"""
+    """Crea y retorna el cliente de BigQuery usando las credenciales de secrets"""
     try:
-        # Intenta cargar desde Streamlit Secrets (para deploy en cloud)
-        if 'gcp_service_account' in st.secrets:
+        # Verificar si el archivo existe localmente (para desarrollo)
+        try:
+            credentials = service_account.Credentials.from_service_account_file(
+                'bigquery-credentials.json'
+            )
+        except FileNotFoundError:
+            # Si no existe el archivo, usar secrets de Streamlit Cloud
             credentials = service_account.Credentials.from_service_account_info(
                 st.secrets["gcp_service_account"]
             )
-            return bigquery.Client(credentials=credentials)
-    except:
-        pass
-    
-    # Para desarrollo local - usa tu archivo de credenciales
-    os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = 'bigquery-credentials.json'
-    return bigquery.Client()
+        
+        client = bigquery.Client(
+            credentials=credentials,
+            project=credentials.project_id
+        )
+        return client
+    except Exception as e:
+        st.error(f"❌ Error al cargar los datos: {e}")
+        st.error("Asegúrate de que:")
+        st.markdown("""
+        - El archivo `bigquery-credentials.json` esté en la misma carpeta que `app.py`
+        - Las credenciales tengan permisos de lectura en BigQuery
+        - La conexión a internet esté activa
+        """)
+        return None
 
-@st.cache_data(ttl=600)  # Cache por 10 minutos
-def get_resumen_mensual(ano=None, mes=None, categorias=None, incluir_sin_clasificar=False):
-    """Obtiene resumen mensual por categoría"""
-    client = get_bigquery_client()
-    
-    # Construir filtros
-    filtros = ["f.fechaemision IS NOT NULL"]
-    
-    if not incluir_sin_clasificar:
-        filtros.append("lf.clasificacion_categoria IS NOT NULL")
-        filtros.append("lf.clasificacion_categoria != 'Sin clasificacion'")
-    
-    if ano:
-        filtros.append(f"EXTRACT(YEAR FROM f.fechaemision) = {ano}")
-    if mes:
-        filtros.append(f"EXTRACT(MONTH FROM f.fechaemision) = {mes}")
-    if categorias:
-        cats_str = "', '".join(categorias)
-        filtros.append(f"lf.clasificacion_categoria IN ('{cats_str}')")
-    
-    where_clause = " AND ".join(filtros)
-    
-    query = f"""
-    WITH facturas_clasificadas AS (
-      SELECT
-        f.fechaemision,
-        f.numerofactura,
-        COALESCE(
-          CONCAT(lf.clasificacion_categoria, ' ', lf.clasificacion_subcategoria),
-          'Sin Clasificación'
-        ) AS categoria_unificada,
-        COALESCE(f.valorneto, 0) + COALESCE(f.iva, 0) AS total_factura
-      FROM `rodenstock-471300.facturacion.lineas_factura` lf
-      JOIN `rodenstock-471300.facturacion.facturas` f
-        ON lf.numerofactura = f.numerofactura
-      WHERE {where_clause}
-      GROUP BY 
-        f.fechaemision,
-        f.numerofactura,
-        categoria_unificada,
-        total_factura
-    )
-    
-    SELECT
-      EXTRACT(YEAR FROM fechaemision) AS ano,
-      EXTRACT(MONTH FROM fechaemision) AS mes,
-      categoria_unificada,
-      COUNT(DISTINCT numerofactura) AS cantidad_trabajos,
-      SUM(total_factura) AS total_dinero,
-      AVG(total_factura) AS promedio_trabajo
-    FROM facturas_clasificadas
-    GROUP BY ano, mes, categoria_unificada
-    ORDER BY ano DESC, mes DESC, total_dinero DESC
-    """
-    
-    return client.query(query).to_dataframe()
+# Conectar a BigQuery
+client = get_bigquery_client()
 
-@st.cache_data(ttl=600)
-def get_evolucion_mensual(categorias=None, incluir_sin_clasificar=False):
-    """Obtiene evolución mes a mes de categorías"""
-    client = get_bigquery_client()
-    
-    filtros = ["f.fechaemision IS NOT NULL"]
-    
-    if not incluir_sin_clasificar:
-        filtros.append("lf.clasificacion_categoria IS NOT NULL")
-        filtros.append("lf.clasificacion_categoria != 'Sin clasificacion'")
-    
-    if categorias:
-        cats_str = "', '".join(categorias)
-        filtros.append(f"lf.clasificacion_categoria IN ('{cats_str}')")
-    
-    where_clause = " AND ".join(filtros)
-    
-    query = f"""
-    WITH facturas_clasificadas AS (
-      SELECT
-        FORMAT_DATE('%Y-%m', f.fechaemision) AS mes,
-        COALESCE(
-          CONCAT(lf.clasificacion_categoria, ' ', lf.clasificacion_subcategoria),
-          'Sin Clasificación'
-        ) AS categoria_unificada,
-        f.numerofactura,
-        COALESCE(f.valorneto, 0) + COALESCE(f.iva, 0) AS total_factura
-      FROM `rodenstock-471300.facturacion.lineas_factura` lf
-      JOIN `rodenstock-471300.facturacion.facturas` f
-        ON lf.numerofactura = f.numerofactura
-      WHERE {where_clause}
-      GROUP BY mes, categoria_unificada, f.numerofactura, total_factura
-    )
-    
-    SELECT
-      mes,
-      categoria_unificada,
-      COUNT(DISTINCT numerofactura) AS cantidad_trabajos,
-      SUM(total_factura) AS total_dinero
-    FROM facturas_clasificadas
-    GROUP BY mes, categoria_unificada
-    ORDER BY mes DESC
-    """
-    
-    return client.query(query).to_dataframe()
+if client is None:
+    st.stop()
 
-@st.cache_data(ttl=600)
-def get_totales_generales(ano=None, mes=None):
-    """Obtiene totales generales del periodo"""
-    client = get_bigquery_client()
-    
-    filtros = ["fechaemision IS NOT NULL"]
-    if ano:
-        filtros.append(f"EXTRACT(YEAR FROM fechaemision) = {ano}")
-    if mes:
-        filtros.append(f"EXTRACT(MONTH FROM fechaemision) = {mes}")
-    
-    where_clause = " AND ".join(filtros)
-    
-    query = f"""
-    SELECT
-      COUNT(DISTINCT numerofactura) AS total_facturas,
-      SUM(COALESCE(valorneto, 0) + COALESCE(iva, 0)) AS total_ingresos,
-      AVG(COALESCE(valorneto, 0) + COALESCE(iva, 0)) AS promedio_factura
-    FROM `rodenstock-471300.facturacion.facturas`
-    WHERE {where_clause}
-    """
-    
-    return client.query(query).to_dataframe()
+# Sidebar con filtros
+st.sidebar.header("🔍 Filtros")
 
-# ============ INTERFAZ DE USUARIO ============
+# Filtro de año
+año_query = """
+SELECT DISTINCT EXTRACT(YEAR FROM fecha) as año
+FROM `rodenstock-471300.facturacion.facturas`
+ORDER BY año DESC
+"""
+años_disponibles = client.query(año_query).to_dataframe()
+año_seleccionado = st.sidebar.selectbox(
+    "Año",
+    options=años_disponibles['año'].tolist(),
+    index=0
+)
 
-# Título principal
-st.title("📊 Dashboard de Facturación Rodenstock")
-st.markdown("---")
+# Filtro de mes
+meses = {
+    "Todos": None,
+    "Enero": 1, "Febrero": 2, "Marzo": 3, "Abril": 4,
+    "Mayo": 5, "Junio": 6, "Julio": 7, "Agosto": 8,
+    "Septiembre": 9, "Octubre": 10, "Noviembre": 11, "Diciembre": 12
+}
+mes_seleccionado = st.sidebar.selectbox("Mes", options=list(meses.keys()))
 
-# ============ SIDEBAR - FILTROS ============
-with st.sidebar:
-    st.header("🔍 Filtros")
-    
-    # Filtro de año
-    anos_disponibles = list(range(2025, datetime.now().year + 1))
-    ano_seleccionado = st.selectbox(
-        "Año",
-        options=[None] + anos_disponibles,
-        format_func=lambda x: "Todos" if x is None else str(x),
-        index=1  # Selecciona 2025 por defecto
-    )
-    
-    # Filtro de mes
-    meses = {
-        None: "Todos",
-        1: "Enero", 2: "Febrero", 3: "Marzo", 4: "Abril",
-        5: "Mayo", 6: "Junio", 7: "Julio", 8: "Agosto",
-        9: "Septiembre", 10: "Octubre", 11: "Noviembre", 12: "Diciembre"
-    }
-    mes_seleccionado = st.selectbox(
-        "Mes",
-        options=list(meses.keys()),
-        format_func=lambda x: meses[x]
-    )
-    
-    # Filtro de categoría
-    categorias_disponibles = ["Newton", "Newton Plus", "Monofocales", "Progresivo"]
-    categorias_seleccionadas = st.multiselect(
-        "Categorías",
-        options=categorias_disponibles,
-        default=categorias_disponibles
-    )
-    
-    # Opción para incluir facturas sin clasificar
-    incluir_sin_clasificar = st.checkbox(
-        "Incluir facturas sin clasificar",
-        value=False,
-        help="Muestra también las facturas que no tienen categoría asignada"
-    )
-    
-    st.markdown("---")
-    st.markdown("### ℹ️ Acerca de")
-    st.info("Dashboard interactivo para análisis de facturación de productos Rodenstock.")
-    
-    # Botón para refrescar datos
-    if st.button("🔄 Actualizar Datos"):
-        st.cache_data.clear()
-        st.rerun()
+# Filtro de categorías
+categorias_query = """
+SELECT DISTINCT categoria
+FROM `rodenstock-471300.facturacion.categorias`
+ORDER BY categoria
+"""
+categorias_disponibles = client.query(categorias_query).to_dataframe()
+categorias_seleccionadas = st.sidebar.multiselect(
+    "Categorías",
+    options=categorias_disponibles['categoria'].tolist(),
+    default=categorias_disponibles['categoria'].tolist()
+)
 
-# ============ MÉTRICAS PRINCIPALES ============
+# Checkbox para incluir facturas sin clasificar
+incluir_sin_clasificar = st.sidebar.checkbox("Incluir facturas sin clasificar", value=False)
+
+# Construir filtro SQL
+filtro_fecha = f"EXTRACT(YEAR FROM f.fecha) = {año_seleccionado}"
+if meses[mes_seleccionado] is not None:
+    filtro_fecha += f" AND EXTRACT(MONTH FROM f.fecha) = {meses[mes_seleccionado]}"
+
+# Query principal con porcentajes corregidos
+query_principal = f"""
+SELECT
+  categorias.categoria,
+  SUM(CAST(ventas.cantidad AS INT64)) AS cantidad_total,
+  ROUND(SAFE_DIVIDE(
+    SUM(CAST(ventas.cantidad AS INT64)), 
+    (SELECT SUM(CAST(cantidad AS INT64)) 
+     FROM `rodenstock-471300.facturacion.vista_ventas_por_categoria`
+     WHERE EXTRACT(YEAR FROM fecha) = {año_seleccionado}
+     {f"AND EXTRACT(MONTH FROM fecha) = {meses[mes_seleccionado]}" if meses[mes_seleccionado] else ""})
+  ) * 100, 2) AS porcentaje
+FROM
+  `rodenstock-471300.facturacion.vista_ventas_por_categoria` AS ventas
+LEFT JOIN
+  `rodenstock-471300.facturacion.categorias` AS categorias
+ON
+  ventas.categoria = categorias.categoria_original
+WHERE
+  {filtro_fecha}
+  {f"AND categorias.categoria IN ({','.join([f'\\'{c}\\'' for c in categorias_seleccionadas])})" if categorias_seleccionadas else ""}
+  {f"OR categorias.categoria IS NULL" if incluir_sin_clasificar else ""}
+GROUP BY
+  categorias.categoria
+ORDER BY
+  cantidad_total DESC
+"""
+
+# Ejecutar query
+df_datos = client.query(query_principal).to_dataframe()
+
+# Mostrar resumen general
 st.header("📈 Resumen General")
 
-try:
-    # Obtener totales
-    totales = get_totales_generales(ano_seleccionado, mes_seleccionado)
-    
+if not df_datos.empty:
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        st.metric(
-            label="Total Trabajos",
-            value=f"{int(totales['total_facturas'].iloc[0]):,}",
-            help="Cantidad total de facturas emitidas"
-        )
+        total_unidades = df_datos['cantidad_total'].sum()
+        st.metric("Total de Unidades", f"{total_unidades:,}")
     
     with col2:
-        st.metric(
-            label="Ingresos Totales",
-            value=f"${int(totales['total_ingresos'].iloc[0]):,}",
-            help="Suma de todas las facturas (neto + IVA)"
-        )
+        total_categorias = len(df_datos)
+        st.metric("Categorías", total_categorias)
     
     with col3:
-        st.metric(
-            label="Promedio por Trabajo",
-            value=f"${int(totales['promedio_factura'].iloc[0]):,}",
-            help="Promedio de facturación por trabajo"
-        )
+        categoria_top = df_datos.iloc[0]['categoria'] if len(df_datos) > 0 else "N/A"
+        st.metric("Categoría Top", categoria_top)
     
-    st.markdown("---")
+    # Gráfico de barras - Distribución por categoría
+    st.subheader("📊 Distribución por Categoría")
     
-    # ============ GRÁFICOS Y TABLAS ============
+    fig_barras = px.bar(
+        df_datos,
+        x='categoria',
+        y='cantidad_total',
+        text='porcentaje',
+        title='Cantidad de Unidades por Categoría',
+        labels={'categoria': 'Categoría', 'cantidad_total': 'Cantidad'},
+        color='cantidad_total',
+        color_continuous_scale='Blues'
+    )
     
-    # Obtener datos filtrados
-    df_resumen = get_resumen_mensual(ano_seleccionado, mes_seleccionado, categorias_seleccionadas, incluir_sin_clasificar)
+    fig_barras.update_traces(texttemplate='%{text:.1f}%', textposition='outside')
+    fig_barras.update_layout(height=500)
+    st.plotly_chart(fig_barras, use_container_width=True)
     
-    if not df_resumen.empty:
-        
-        # Crear pestañas
-        tab1, tab2, tab3 = st.tabs(["📊 Distribución", "📈 Evolución", "📋 Detalle"])
-        
-        # ============ TAB 1: DISTRIBUCIÓN POR CATEGORÍA ============
-        with tab1:
-            st.subheader("Distribución por Categoría")
-            
-            col1, col2 = st.columns([2, 1])
-            
-            with col1:
-                # Gráfico de barras
-                fig_barras = px.bar(
-                    df_resumen.sort_values('total_dinero', ascending=False).head(15),
-                    x='categoria_unificada',
-                    y='cantidad_trabajos',
-                    color='categoria_unificada',
-                    title='Top 15 Categorías por Cantidad de Trabajos',
-                    labels={'cantidad_trabajos': 'Cantidad', 'categoria_unificada': 'Categoría'},
-                    height=500
-                )
-                fig_barras.update_layout(showlegend=False, xaxis_tickangle=-45)
-                st.plotly_chart(fig_barras, use_container_width=True)
-            
-            with col2:
-                # Gráfico de pastel
-                fig_pie = px.pie(
-                    df_resumen.head(10),
-                    values='total_dinero',
-                    names='categoria_unificada',
-                    title='Distribución de Ingresos (Top 10)',
-                    height=500
-                )
-                st.plotly_chart(fig_pie, use_container_width=True)
-        
-        # ============ TAB 2: EVOLUCIÓN MENSUAL ============
-        with tab2:
-            st.subheader("Evolución Mensual")
-            
-            df_evolucion = get_evolucion_mensual(categorias_seleccionadas, incluir_sin_clasificar)
-            
-            if not df_evolucion.empty:
-                # Calcular promedio
-                df_evolucion['promedio_trabajo'] = df_evolucion['total_dinero'] / df_evolucion['cantidad_trabajos']
-                
-                # Gráfico 1: Evolución de Trabajos
-                fig_lineas = px.line(
-                    df_evolucion,
-                    x='mes',
-                    y='cantidad_trabajos',
-                    color='categoria_unificada',
-                    title='Evolución de Trabajos por Mes',
-                    labels={'cantidad_trabajos': 'Cantidad', 'mes': 'Mes'},
-                    height=450,
-                    markers=True
-                )
-                st.plotly_chart(fig_lineas, use_container_width=True)
-                
-                # Gráfico 2: Evolución de Ingresos
-                fig_area = px.area(
-                    df_evolucion,
-                    x='mes',
-                    y='total_dinero',
-                    color='categoria_unificada',
-                    title='Evolución de Ingresos por Mes',
-                    labels={'total_dinero': 'Ingresos', 'mes': 'Mes'},
-                    height=450
-                )
-                st.plotly_chart(fig_area, use_container_width=True)
-                
-                # Gráfico 3: Evolución del Promedio (NUEVO)
-                fig_promedio = px.line(
-                    df_evolucion,
-                    x='mes',
-                    y='promedio_trabajo',
-                    color='categoria_unificada',
-                    title='Evolución del Promedio por Trabajo',
-                    labels={'promedio_trabajo': 'Promedio ($)', 'mes': 'Mes'},
-                    height=450,
-                    markers=True
-                )
-                st.plotly_chart(fig_promedio, use_container_width=True)
-            else:
-                st.warning("No hay datos de evolución para mostrar con los filtros seleccionados.")
-        
-        # ============ TAB 3: TABLA DETALLADA ============
-        with tab3:
-            st.subheader("Tabla Detallada")
-            
-            # Formatear columnas
-            df_display = df_resumen.copy()
-            df_display['total_dinero'] = df_display['total_dinero'].apply(lambda x: f"${x:,.0f}")
-            df_display['promedio_trabajo'] = df_display['promedio_trabajo'].apply(lambda x: f"${x:,.0f}")
-            
-            # Renombrar columnas
-            df_display.columns = ['Año', 'Mes', 'Categoría', 'Cantidad Trabajos', 'Total Ingresos', 'Promedio por Trabajo']
-            
-            # Mostrar tabla
-            st.dataframe(
-                df_display,
-                use_container_width=True,
-                height=600
-            )
-            
-            # Botón de descarga
-            csv = df_resumen.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="📥 Descargar CSV",
-                data=csv,
-                file_name=f'rodenstock_facturacion_{datetime.now().strftime("%Y%m%d")}.csv',
-                mime='text/csv',
-            )
+    # Gráfico de torta - Porcentajes
+    st.subheader("🥧 Distribución Porcentual")
     
-    else:
-        st.warning("⚠️ No hay datos disponibles para los filtros seleccionados. Intenta cambiar los criterios de búsqueda.")
+    fig_torta = px.pie(
+        df_datos,
+        values='cantidad_total',
+        names='categoria',
+        title='Distribución Porcentual por Categoría',
+        hole=0.4
+    )
+    
+    fig_torta.update_traces(textposition='inside', textinfo='percent+label')
+    fig_torta.update_layout(height=500)
+    st.plotly_chart(fig_torta, use_container_width=True)
+    
+    # Tabla de datos
+    st.subheader("📋 Detalle por Categoría")
+    
+    df_display = df_datos.copy()
+    df_display['porcentaje'] = df_display['porcentaje'].apply(lambda x: f"{x:.2f}%")
+    df_display.columns = ['Categoría', 'Cantidad Total', 'Porcentaje']
+    
+    st.dataframe(
+        df_display,
+        use_container_width=True,
+        hide_index=True
+    )
+    
+    # Botón para actualizar datos
+    st.sidebar.markdown("---")
+    if st.sidebar.button("🔄 Actualizar Datos"):
+        st.cache_resource.clear()
+        st.rerun()
 
-except Exception as e:
-    st.error(f"❌ Error al cargar los datos: {str(e)}")
-    st.info("💡 Asegúrate de que:")
-    st.markdown("""
+else:
+    st.warning("⚠️ No hay datos disponibles para los filtros seleccionados.")
+    st.info("""
+    💡 Asegúrate de que:
     - El archivo `bigquery-credentials.json` esté en la misma carpeta que `app.py`
     - Las credenciales tengan permisos de lectura en BigQuery
     - La conexión a internet esté activa
     """)
 
-# ============ FOOTER ============
+# Footer
 st.markdown("---")
-st.caption("Dashboard desarrollado con Streamlit | Datos desde BigQuery | © 2025 Rodenstock")
+st.markdown("Dashboard desarrollado con Streamlit | Datos desde BigQuery | © 2025 Rodenstock")
