@@ -46,15 +46,15 @@ def get_resumen_mensual(ano=None, mes=None):
     SELECT
       EXTRACT(YEAR FROM f.fechaemision) AS ano,
       EXTRACT(MONTH FROM f.fechaemision) AS mes,
-      lf.producto AS categoria,
+      lf.descripcion AS producto,
       COUNT(DISTINCT lf.numerofactura) AS cantidad_trabajos,
-      SUM(CAST(lf.total AS FLOAT64)) AS total_dinero,
-      AVG(CAST(lf.total AS FLOAT64)) AS promedio_trabajo
+      SUM(CAST(lf.total_linea AS FLOAT64)) AS total_dinero,
+      AVG(CAST(lf.total_linea AS FLOAT64)) AS promedio_trabajo
     FROM `rodenstock-471300.facturacion.lineas_factura` lf
     JOIN `rodenstock-471300.facturacion.facturas` f
       ON lf.numerofactura = f.numerofactura
     WHERE {where_clause}
-    GROUP BY ano, mes, categoria
+    GROUP BY ano, mes, producto
     ORDER BY ano DESC, mes DESC, total_dinero DESC
     """
     return client.query(query).to_dataframe()
@@ -67,14 +67,14 @@ def get_evolucion_mensual():
     query = """
     SELECT
       FORMAT_DATE('%Y-%m', f.fechaemision) AS mes,
-      lf.producto AS categoria,
+      lf.descripcion AS producto,
       COUNT(DISTINCT lf.numerofactura) AS cantidad_trabajos,
-      SUM(CAST(lf.total AS FLOAT64)) AS total_dinero
+      SUM(CAST(lf.total_linea AS FLOAT64)) AS total_dinero
     FROM `rodenstock-471300.facturacion.lineas_factura` lf
     JOIN `rodenstock-471300.facturacion.facturas` f
       ON lf.numerofactura = f.numerofactura
     WHERE f.fechaemision IS NOT NULL
-    GROUP BY mes, categoria
+    GROUP BY mes, producto
     ORDER BY mes DESC
     """
     return client.query(query).to_dataframe()
@@ -159,11 +159,11 @@ try:
                 with col1:
                     fig_barras = px.bar(
                         df_resumen.sort_values('total_dinero', ascending=False).head(15),
-                        x='categoria',
+                        x='producto',
                         y='cantidad_trabajos',
-                        color='categoria',
+                        color='producto',
                         title='Top 15 Productos por Cantidad de Trabajos',
-                        labels={'cantidad_trabajos': 'Cantidad', 'categoria': 'Producto'},
+                        labels={'cantidad_trabajos': 'Cantidad', 'producto': 'Producto'},
                         height=500
                     )
                     fig_barras.update_layout(showlegend=False, xaxis_tickangle=-45)
@@ -172,7 +172,7 @@ try:
                     fig_pie = px.pie(
                         df_resumen.head(10),
                         values='total_dinero',
-                        names='categoria',
+                        names='producto',
                         title='Distribucion de Ingresos (Top 10)',
                         height=500
                     )
@@ -186,7 +186,7 @@ try:
                         df_evolucion,
                         x='mes',
                         y='cantidad_trabajos',
-                        color='categoria',
+                        color='producto',
                         title='Evolucion de Trabajos por Mes',
                         labels={'cantidad_trabajos': 'Cantidad', 'mes': 'Mes'},
                         height=450,
@@ -197,7 +197,7 @@ try:
                         df_evolucion,
                         x='mes',
                         y='total_dinero',
-                        color='categoria',
+                        color='producto',
                         title='Evolucion de Ingresos por Mes',
                         labels={'total_dinero': 'Ingresos', 'mes': 'Mes'},
                         height=450
