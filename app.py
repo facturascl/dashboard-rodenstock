@@ -45,7 +45,7 @@ def get_resumen_mensual(ano=None, mes=None):
     
     if ano:
         filtros.append(f"EXTRACT(YEAR FROM lf.fechaemision) = {ano}")
-    if mes:
+    if mes is not None:
         filtros.append(f"EXTRACT(MONTH FROM lf.fechaemision) = {mes}")
     
     where_clause = " AND ".join(filtros)
@@ -97,7 +97,7 @@ def get_totales_generales(ano=None, mes=None):
     filtros = ["fechaemision IS NOT NULL"]
     if ano:
         filtros.append(f"EXTRACT(YEAR FROM fechaemision) = {ano}")
-    if mes:
+    if mes is not None:
         filtros.append(f"EXTRACT(MONTH FROM fechaemision) = {mes}")
     
     where_clause = " AND ".join(filtros)
@@ -126,23 +126,23 @@ with st.sidebar:
     ano_seleccionado = st.selectbox(
         "Año",
         options=anos_disponibles,
-        index=len(anos_disponibles) - 1  # Selecciona el año actual por defecto
+        index=len(anos_disponibles) - 1
     )
     
     # Filtro de mes
-    meses_dict = {
-        0: "Todos",
+    meses = {
+        None: "Todos",
         1: "Enero", 2: "Febrero", 3: "Marzo", 4: "Abril",
         5: "Mayo", 6: "Junio", 7: "Julio", 8: "Agosto",
         9: "Septiembre", 10: "Octubre", 11: "Noviembre", 12: "Diciembre"
     }
     
-    mes_index = st.selectbox(
+    mes_seleccionado = st.selectbox(
         "Mes",
-        options=list(meses_dict.keys()),
-        format_func=lambda x: meses_dict[x]
+        options=list(meses.keys()),
+        format_func=lambda x: meses[x],
+        index=0
     )
-    mes_seleccionado = None if mes_index == 0 else mes_index
     
     st.markdown("---")
     if st.button("Actualizar Datos"):
