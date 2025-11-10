@@ -8,13 +8,13 @@ import json
 
 # Configuración de la página
 st.set_page_config(
-    page_title="Dashboard de Facturación Rodenstock",
+    page_title="Dashboard de Facturacion Rodenstock",
     page_icon="📊",
     layout="wide"
 )
 
 # Título del dashboard
-st.title("📊 Dashboard de Facturación Rodenstock")
+st.title("📊 Dashboard de Facturacion Rodenstock")
 
 # Función para cargar credenciales y conectar a BigQuery
 @st.cache_resource
@@ -38,12 +38,12 @@ def get_bigquery_client():
         )
         return client
     except Exception as e:
-        st.error(f"❌ Error al cargar los datos: {e}")
-        st.error("Asegúrate de que:")
+        st.error(f"Error al cargar los datos: {e}")
+        st.error("Asegurate de que:")
         st.markdown("""
-        - El archivo `bigquery-credentials.json` esté en la misma carpeta que `app.py`
+        - El archivo `bigquery-credentials.json` este en la misma carpeta que `app.py`
         - Las credenciales tengan permisos de lectura en BigQuery
-        - La conexión a internet esté activa
+        - La conexion a internet este activa
         """)
         return None
 
@@ -54,18 +54,18 @@ if client is None:
     st.stop()
 
 # Sidebar con filtros
-st.sidebar.header("🔍 Filtros")
+st.sidebar.header("Filtros")
 
-# Filtro de año
-año_query = """
-SELECT DISTINCT EXTRACT(YEAR FROM fecha) as año
+# Filtro de año (sin ñ)
+anio_query = """
+SELECT DISTINCT EXTRACT(YEAR FROM fecha) as anio
 FROM `rodenstock-471300.facturacion.facturas`
-ORDER BY año DESC
+ORDER BY anio DESC
 """
-años_disponibles = client.query(año_query).to_dataframe()
-año_seleccionado = st.sidebar.selectbox(
+anios_disponibles = client.query(anio_query).to_dataframe()
+anio_seleccionado = st.sidebar.selectbox(
     "Año",
-    options=años_disponibles['año'].tolist(),
+    options=anios_disponibles['anio'].tolist(),
     index=0
 )
 
@@ -86,7 +86,7 @@ ORDER BY categoria
 """
 categorias_disponibles = client.query(categorias_query).to_dataframe()
 categorias_seleccionadas = st.sidebar.multiselect(
-    "Categorías",
+    "Categorias",
     options=categorias_disponibles['categoria'].tolist(),
     default=categorias_disponibles['categoria'].tolist()
 )
@@ -95,7 +95,7 @@ categorias_seleccionadas = st.sidebar.multiselect(
 incluir_sin_clasificar = st.sidebar.checkbox("Incluir facturas sin clasificar", value=False)
 
 # Construir filtro SQL de manera segura
-filtro_fecha = f"EXTRACT(YEAR FROM ventas.fecha) = {año_seleccionado}"
+filtro_fecha = f"EXTRACT(YEAR FROM ventas.fecha) = {anio_seleccionado}"
 if meses[mes_seleccionado] is not None:
     filtro_fecha += f" AND EXTRACT(MONTH FROM ventas.fecha) = {meses[mes_seleccionado]}"
 
@@ -118,7 +118,7 @@ SELECT
     SUM(CAST(ventas.cantidad AS INT64)), 
     (SELECT SUM(CAST(cantidad AS INT64)) 
      FROM `rodenstock-471300.facturacion.vista_ventas_por_categoria`
-     WHERE EXTRACT(YEAR FROM fecha) = {año_seleccionado}
+     WHERE EXTRACT(YEAR FROM fecha) = {anio_seleccionado}
      {f"AND EXTRACT(MONTH FROM fecha) = {meses[mes_seleccionado]}" if meses[mes_seleccionado] else ""})
   ) * 100, 2) AS porcentaje
 FROM
@@ -140,7 +140,7 @@ ORDER BY
 df_datos = client.query(query_principal).to_dataframe()
 
 # Mostrar resumen general
-st.header("📈 Resumen General")
+st.header("Resumen General")
 
 if not df_datos.empty:
     col1, col2, col3 = st.columns(3)
@@ -151,22 +151,22 @@ if not df_datos.empty:
     
     with col2:
         total_categorias = len(df_datos)
-        st.metric("Categorías", total_categorias)
+        st.metric("Categorias", total_categorias)
     
     with col3:
         categoria_top = df_datos.iloc[0]['categoria'] if len(df_datos) > 0 else "N/A"
-        st.metric("Categoría Top", categoria_top)
+        st.metric("Categoria Top", categoria_top)
     
     # Gráfico de barras - Distribución por categoría
-    st.subheader("📊 Distribución por Categoría")
+    st.subheader("Distribucion por Categoria")
     
     fig_barras = px.bar(
         df_datos,
         x='categoria',
         y='cantidad_total',
         text='porcentaje',
-        title='Cantidad de Unidades por Categoría',
-        labels={'categoria': 'Categoría', 'cantidad_total': 'Cantidad'},
+        title='Cantidad de Unidades por Categoria',
+        labels={'categoria': 'Categoria', 'cantidad_total': 'Cantidad'},
         color='cantidad_total',
         color_continuous_scale='Blues'
     )
@@ -176,13 +176,13 @@ if not df_datos.empty:
     st.plotly_chart(fig_barras, use_container_width=True)
     
     # Gráfico de torta - Porcentajes
-    st.subheader("🥧 Distribución Porcentual")
+    st.subheader("Distribucion Porcentual")
     
     fig_torta = px.pie(
         df_datos,
         values='cantidad_total',
         names='categoria',
-        title='Distribución Porcentual por Categoría',
+        title='Distribucion Porcentual por Categoria',
         hole=0.4
     )
     
@@ -191,11 +191,11 @@ if not df_datos.empty:
     st.plotly_chart(fig_torta, use_container_width=True)
     
     # Tabla de datos
-    st.subheader("📋 Detalle por Categoría")
+    st.subheader("Detalle por Categoria")
     
     df_display = df_datos.copy()
     df_display['porcentaje'] = df_display['porcentaje'].apply(lambda x: f"{x:.2f}%")
-    df_display.columns = ['Categoría', 'Cantidad Total', 'Porcentaje']
+    df_display.columns = ['Categoria', 'Cantidad Total', 'Porcentaje']
     
     st.dataframe(
         df_display,
@@ -205,19 +205,19 @@ if not df_datos.empty:
     
     # Botón para actualizar datos
     st.sidebar.markdown("---")
-    if st.sidebar.button("🔄 Actualizar Datos"):
+    if st.sidebar.button("Actualizar Datos"):
         st.cache_resource.clear()
         st.rerun()
 
 else:
-    st.warning("⚠️ No hay datos disponibles para los filtros seleccionados.")
+    st.warning("No hay datos disponibles para los filtros seleccionados.")
     st.info("""
-    💡 Asegúrate de que:
-    - El archivo `bigquery-credentials.json` esté en la misma carpeta que `app.py`
+    Asegurate de que:
+    - El archivo `bigquery-credentials.json` este en la misma carpeta que `app.py`
     - Las credenciales tengan permisos de lectura en BigQuery
-    - La conexión a internet esté activa
+    - La conexion a internet este activa
     """)
 
 # Footer
 st.markdown("---")
-st.markdown("Dashboard desarrollado con Streamlit | Datos desde BigQuery | © 2025 Rodenstock")
+st.markdown("Dashboard desarrollado con Streamlit | Datos desde BigQuery | (c) 2025 Rodenstock")
