@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 from google.cloud import bigquery
 from google.oauth2 import service_account
 from datetime import datetime
@@ -54,7 +55,7 @@ def get_resumen_mensual(ano=None, mes=None):
           COALESCE(lf.clasificacion_subcategoria, '')
         ) AS categoria,
         COUNT(DISTINCT lf.numerofactura) AS cantidad_trabajos,
-        SUM(CAST(lf.total_linea AS FLOAT64)) AS total_dinero
+        SUM(CAST(lf.total_linea AS FLOAT64) * 1.19) AS total_dinero
       FROM `rodenstock-471300.facturacion.lineas_factura` lf
       JOIN `rodenstock-471300.facturacion.facturas` f
         ON lf.numerofactura = f.numerofactura
@@ -93,13 +94,32 @@ def get_evolucion_mensual():
         COALESCE(lf.clasificacion_subcategoria, '')
       ) AS categoria,
       COUNT(DISTINCT lf.numerofactura) AS cantidad_trabajos,
-      SUM(CAST(lf.total_linea AS FLOAT64)) AS total_dinero
+      SUM(CAST(lf.total_linea AS FLOAT64) * 1.19) AS total_dinero
     FROM `rodenstock-471300.facturacion.lineas_factura` lf
     JOIN `rodenstock-471300.facturacion.facturas` f
       ON lf.numerofactura = f.numerofactura
     WHERE f.fechaemision IS NOT NULL
     GROUP BY mes, categoria
-    ORDER BY mes DESC
+    ORDER BY mes ASC
+    """
+    return client.query(query).to_dataframe()
+
+@st.cache_data(ttl=600)
+def get_facturas_vs_notas():
+    client = get_bigquery_client()
+    if client is None:
+        return pd.DataFrame()
+    query = """
+    SELECT
+      FORMAT_DATE('%Y-%m', fechaemision) AS mes,
+      COUNTIF(numerofactura LIKE 'F%') AS cantidad_facturas,
+      COUNTIF(numerofactura LIKE 'N%') AS cantidad_notas,
+      SUM(CAST(COALESCE(valorneto, 0) AS FLOAT64) + CAST(COALESCE(iva, 0) AS FLOAT64)) AS total_mes,
+      AVG(CAST(COALESCE(valorneto, 0) AS FLOAT64) + CAST(COALESCE(iva, 0) AS FLOAT64)) AS promedio_mes
+    FROM `rodenstock-471300.facturacion.facturas`
+    WHERE fechaemision IS NOT NULL
+    GROUP BY mes
+    ORDER BY mes ASC
     """
     return client.query(query).to_dataframe()
 
@@ -177,6 +197,8 @@ try:
         df_resumen = get_resumen_mensual(ano_seleccionado, mes_seleccionado)
         if not df_resumen.empty:
             tab1, tab2, tab3 = st.tabs(["Distribucion", "Evolucion", "Detalle"])
+            
+            # TAB 1: DISTRIBUCION
             with tab1:
                 st.subheader("Distribucion por Categoria")
                 col1, col2 = st.columns([2, 1])
@@ -201,41 +223,115 @@ try:
                         height=500
                     )
                     st.plotly_chart(fig_pie, use_container_width=True)
+                
+                # Nuevo grafico: Facturas vs Notas de Credito por mes
+                st.subheader("Facturas vs Notas de Credito por Mes")
+                df_fac_notas = get_facturas_vs_notas()
+                if not df_fac_notas.empty:
+                    fig_combo = go.Figure()
+                    fig_combo.add_trace(go.Bar(
+                        x=df_fac_notas['mes'],
+                        y=df_fac_notas['cantidad_facturas'],
+                        name='Facturas',
+                        marker_color='#3b82f6'
+                    ))
+                    fig_combo.add_trace(go.Bar(
+                        x=df_fac_notas['mes'],
+                        y=df_fac_notas['cantidad_notas'],
+                        name='Notas de Credito',
+                        marker_color='#ef4444'
+                    ))
+                    fig_combo.add_trace(go.Scatter(
+                        x=df_fac_notas['mes'],
+                        y=df_fac_notas['promedio_mes'],
+                        name='Promedio Mensual',
+                        yaxis='y2',
+                        line=dict(color='#059669', width=3),
+                        mode='lines+markers'
+                    ))
+                    fig_combo.update_layout(
+                        title='Cantidad de Facturas y Notas vs Promedio Mensual',
+                        xaxis_title='Mes',
+                        yaxis_title='Cantidad',
+                        yaxis2=dict(
+                            title='Promedio ($)',
+                            overlaying='y',
+                            side='right'
+                        ),
+                        barmode='group',
+                        height=500,
+                        hovermode='x unified'
+                    )
+                    st.plotly_chart(fig_combo, use_container_width=True)
+            
+            # TAB 2: EVOLUCION
             with tab2:
                 st.subheader("Evolucion Mensual")
                 df_evolucion = get_evolucion_mensual()
                 if not df_evolucion.empty:
                     df_evolucion['promedio_trabajo'] = df_evolucion['total_dinero'] / df_evolucion['cantidad_trabajos']
-                    fig_lineas = px.line(
+                    
+                    # Grafico 1: Cantidad de trabajos
+                    fig_trabajos = px.line(
                         df_evolucion,
                         x='mes',
                         y='cantidad_trabajos',
                         color='categoria',
-                        title='Evolucion de Trabajos por Mes',
+                        title='Cantidad de Trabajos por Mes',
                         labels={'cantidad_trabajos': 'Cantidad', 'mes': 'Mes'},
                         height=450,
                         markers=True
                     )
-                    st.plotly_chart(fig_lineas, use_container_width=True)
-                    fig_area = px.area(
+                    fig_trabajos.update_traces(
+                        customdata=df_evolucion[['total_dinero', 'promedio_trabajo']],
+                        hovertemplate='<b>%{fullData.name}</b><br>Mes: %{x}<br>Cantidad: %{y}<br>Total: $%{customdata[0]:,.0f}<br>Promedio: $%{customdata[1]:,.0f}<extra></extra>'
+                    )
+                    st.plotly_chart(fig_trabajos, use_container_width=True)
+                    
+                    # Grafico 2: Total por mes
+                    fig_total = px.line(
                         df_evolucion,
                         x='mes',
                         y='total_dinero',
                         color='categoria',
-                        title='Evolucion de Ingresos por Mes',
+                        title='Total de Ingresos por Mes',
                         labels={'total_dinero': 'Ingresos', 'mes': 'Mes'},
-                        height=450
+                        height=450,
+                        markers=True
                     )
-                    st.plotly_chart(fig_area, use_container_width=True)
+                    fig_total.update_traces(
+                        customdata=df_evolucion[['cantidad_trabajos', 'promedio_trabajo']],
+                        hovertemplate='<b>%{fullData.name}</b><br>Mes: %{x}<br>Total: $%{y:,.0f}<br>Cantidad: %{customdata[0]}<br>Promedio: $%{customdata[1]:,.0f}<extra></extra>'
+                    )
+                    st.plotly_chart(fig_total, use_container_width=True)
+                    
+                    # Grafico 3: Promedio por trabajo
+                    fig_promedio = px.line(
+                        df_evolucion,
+                        x='mes',
+                        y='promedio_trabajo',
+                        color='categoria',
+                        title='Promedio por Trabajo',
+                        labels={'promedio_trabajo': 'Promedio ($)', 'mes': 'Mes'},
+                        height=450,
+                        markers=True
+                    )
+                    fig_promedio.update_traces(
+                        customdata=df_evolucion[['cantidad_trabajos', 'total_dinero']],
+                        hovertemplate='<b>%{fullData.name}</b><br>Mes: %{x}<br>Promedio: $%{y:,.0f}<br>Cantidad: %{customdata[0]}<br>Total: $%{customdata[1]:,.0f}<extra></extra>'
+                    )
+                    st.plotly_chart(fig_promedio, use_container_width=True)
                 else:
                     st.warning("No hay datos de evolucion disponibles.")
+            
+            # TAB 3: TABLA
             with tab3:
                 st.subheader("Tabla Detallada")
                 df_display = df_resumen.copy()
                 df_display['total_dinero'] = df_display['total_dinero'].apply(lambda x: f"${x:,.0f}")
                 df_display['promedio_trabajo'] = df_display['promedio_trabajo'].apply(lambda x: f"${x:,.0f}")
                 df_display['porcentaje'] = df_display['porcentaje'].apply(lambda x: f"{x:.2f}%")
-                df_display.columns = ['Año', 'Mes', 'Categoria', 'Cantidad Trabajos', 'Total Ingresos', 'Promedio por Trabajo', 'Porcentaje']
+                df_display.columns = ['Año', 'Mes', 'Categoria', 'Cantidad Trabajos', 'Total Ingresos (con IVA)', 'Promedio por Trabajo', 'Porcentaje']
                 st.dataframe(df_display, use_container_width=True, height=600)
                 csv = df_resumen.to_csv(index=False).encode('utf-8')
                 st.download_button(
@@ -253,4 +349,4 @@ except Exception as e:
     st.info("Asegurate de que las credenciales de BigQuery esten configuradas correctamente.")
 
 st.markdown("---")
-st.caption("Dashboard desarrollado por Cristián Ibañez | Datos desde BigQuery | (c) 2025 Rodenstock | (c) 2025 Ben & Frank")
+st.caption("Dashboard desarrollado con Streamlit | Datos desde BigQuery | (c) 2025 Rodenstock")
