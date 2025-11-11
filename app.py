@@ -81,6 +81,36 @@ def get_resumen_mensual(ano=None, mes=None):
     return client.query(query).to_dataframe()
 
 @st.cache_data(ttl=600)
+def get_distribucion_mensual_anual(ano):
+    """Obtiene distribucion mensual del año seleccionado para grafico de torta"""
+    client = get_bigquery_client()
+    if client is None:
+        return pd.DataFrame()
+    query = f"""
+    WITH datos_mensuales AS (
+      SELECT
+        FORMAT_DATE('%Y-%m', f.fechaemision) AS mes,
+        SUM(CAST(COALESCE(f.valorneto, 0) AS FLOAT64) + CAST(COALESCE(f.iva, 0) AS FLOAT64)) AS total_mes
+      FROM `rodenstock-471300.facturacion.facturas` f
+      WHERE EXTRACT(YEAR FROM f.fechaemision) = {ano}
+        AND f.fechaemision IS NOT NULL
+      GROUP BY mes
+    ),
+    total_anual AS (
+      SELECT SUM(total_mes) AS total_ano
+      FROM datos_mensuales
+    )
+    SELECT
+      dm.mes,
+      dm.total_mes,
+      ROUND((dm.total_mes * 100.0) / ta.total_ano, 1) AS porcentaje
+    FROM datos_mensuales dm
+    CROSS JOIN total_anual ta
+    ORDER BY dm.mes ASC
+    """
+    return client.query(query).to_dataframe()
+
+@st.cache_data(ttl=600)
 def get_evolucion_mensual():
     client = get_bigquery_client()
     if client is None:
@@ -224,7 +254,7 @@ try:
                     )
                     st.plotly_chart(fig_pie, use_container_width=True)
                 
-                # Nuevo grafico: Facturas vs Notas de Credito por mes
+                # Grafico: Facturas vs Notas de Credito por mes
                 st.subheader("Facturas vs Notas de Credito por Mes")
                 df_fac_notas = get_facturas_vs_notas()
                 if not df_fac_notas.empty:
@@ -263,6 +293,24 @@ try:
                         hovermode='x unified'
                     )
                     st.plotly_chart(fig_combo, use_container_width=True)
+                
+                # NUEVO: Grafico de distribucion mensual (torta)
+                st.subheader(f"Distribucion Mensual del Año {ano_seleccionado}")
+                df_dist_mensual = get_distribucion_mensual_anual(ano_seleccionado)
+                if not df_dist_mensual.empty:
+                    fig_pie_mensual = px.pie(
+                        df_dist_mensual,
+                        values='total_mes',
+                        names='mes',
+                        title=f'Porcentaje que Representa Cada Mes del Total Anual {ano_seleccionado}',
+                        height=600
+                    )
+                    fig_pie_mensual.update_traces(
+                        textposition='inside',
+                        textinfo='percent+label',
+                        hovertemplate='<b>%{label}</b><br>Total: $%{value:,.0f}<br>Porcentaje: %{percent}<extra></extra>'
+                    )
+                    st.plotly_chart(fig_pie_mensual, use_container_width=True)
             
             # TAB 2: EVOLUCION
             with tab2:
