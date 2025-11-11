@@ -55,7 +55,7 @@ def get_resumen_mensual(ano=None, mes=None):
           COALESCE(lf.clasificacion_subcategoria, '')
         ) AS categoria,
         COUNT(DISTINCT lf.numerofactura) AS cantidad_trabajos,
-        SUM(CAST(lf.total_linea AS FLOAT64) * 1.19) AS total_dinero
+        ROUND(SUM(CAST(lf.total_linea AS FLOAT64) * 1.19), 0) AS total_dinero
       FROM `rodenstock-471300.facturacion.lineas_factura` lf
       JOIN `rodenstock-471300.facturacion.facturas` f
         ON lf.numerofactura = f.numerofactura
@@ -90,7 +90,7 @@ def get_distribucion_mensual_anual(ano):
     WITH datos_mensuales AS (
       SELECT
         FORMAT_DATE('%Y-%m', f.fechaemision) AS mes,
-        SUM(CAST(COALESCE(f.valorneto, 0) AS FLOAT64) + CAST(COALESCE(f.iva, 0) AS FLOAT64)) AS total_mes
+        ROUND(SUM(CAST(COALESCE(f.valorneto, 0) AS FLOAT64) + CAST(COALESCE(f.iva, 0) AS FLOAT64)), 0) AS total_mes
       FROM `rodenstock-471300.facturacion.facturas` f
       WHERE EXTRACT(YEAR FROM f.fechaemision) = {ano}
         AND f.fechaemision IS NOT NULL
@@ -124,7 +124,7 @@ def get_evolucion_mensual():
         COALESCE(lf.clasificacion_subcategoria, '')
       ) AS categoria,
       COUNT(DISTINCT lf.numerofactura) AS cantidad_trabajos,
-      SUM(CAST(lf.total_linea AS FLOAT64) * 1.19) AS total_dinero
+      ROUND(SUM(CAST(lf.total_linea AS FLOAT64) * 1.19), 0) AS total_dinero
     FROM `rodenstock-471300.facturacion.lineas_factura` lf
     JOIN `rodenstock-471300.facturacion.facturas` f
       ON lf.numerofactura = f.numerofactura
@@ -142,10 +142,10 @@ def get_facturas_vs_notas():
     query = """
     SELECT
       FORMAT_DATE('%Y-%m', fechaemision) AS mes,
-      COUNTIF(numerofactura LIKE 'F%') AS cantidad_facturas,
+      COUNTIF(numerofactura LIKE 'F%' OR numerofactura NOT LIKE 'N%') AS cantidad_facturas,
       COUNTIF(numerofactura LIKE 'N%') AS cantidad_notas,
-      SUM(CAST(COALESCE(valorneto, 0) AS FLOAT64) + CAST(COALESCE(iva, 0) AS FLOAT64)) AS total_mes,
-      AVG(CAST(COALESCE(valorneto, 0) AS FLOAT64) + CAST(COALESCE(iva, 0) AS FLOAT64)) AS promedio_mes
+      ROUND(SUM(CAST(COALESCE(valorneto, 0) AS FLOAT64) + CAST(COALESCE(iva, 0) AS FLOAT64)), 0) AS total_mes,
+      ROUND(AVG(CAST(COALESCE(valorneto, 0) AS FLOAT64) + CAST(COALESCE(iva, 0) AS FLOAT64)), 0) AS promedio_mes
     FROM `rodenstock-471300.facturacion.facturas`
     WHERE fechaemision IS NOT NULL
     GROUP BY mes
@@ -167,8 +167,8 @@ def get_totales_generales(ano=None, mes=None):
     query = f"""
     SELECT
       COUNT(DISTINCT numerofactura) AS total_facturas,
-      SUM(CAST(COALESCE(valorneto, 0) AS FLOAT64) + CAST(COALESCE(iva, 0) AS FLOAT64)) AS total_ingresos,
-      AVG(CAST(COALESCE(valorneto, 0) AS FLOAT64) + CAST(COALESCE(iva, 0) AS FLOAT64)) AS promedio_factura
+      ROUND(SUM(CAST(COALESCE(valorneto, 0) AS FLOAT64) + CAST(COALESCE(iva, 0) AS FLOAT64)), 0) AS total_ingresos,
+      ROUND(AVG(CAST(COALESCE(valorneto, 0) AS FLOAT64) + CAST(COALESCE(iva, 0) AS FLOAT64)), 0) AS promedio_factura
     FROM `rodenstock-471300.facturacion.facturas`
     WHERE {where_clause}
     """
@@ -263,13 +263,15 @@ try:
                         x=df_fac_notas['mes'],
                         y=df_fac_notas['cantidad_facturas'],
                         name='Facturas',
-                        marker_color='#3b82f6'
+                        marker_color='#3b82f6',
+                        hovertemplate='<b>Facturas</b><br>Mes: %{x}<br>Cantidad: %{y}<extra></extra>'
                     ))
                     fig_combo.add_trace(go.Bar(
                         x=df_fac_notas['mes'],
                         y=df_fac_notas['cantidad_notas'],
                         name='Notas de Credito',
-                        marker_color='#ef4444'
+                        marker_color='#ef4444',
+                        hovertemplate='<b>Notas de Crédito</b><br>Mes: %{x}<br>Cantidad: %{y}<extra></extra>'
                     ))
                     fig_combo.add_trace(go.Scatter(
                         x=df_fac_notas['mes'],
@@ -277,7 +279,8 @@ try:
                         name='Promedio Mensual',
                         yaxis='y2',
                         line=dict(color='#059669', width=3),
-                        mode='lines+markers'
+                        mode='lines+markers',
+                        hovertemplate='<b>Promedio Mensual</b><br>Mes: %{x}<br>Promedio: $%{y:,.0f}<extra></extra>'
                     ))
                     fig_combo.update_layout(
                         title='Cantidad de Facturas y Notas vs Promedio Mensual',
@@ -290,11 +293,11 @@ try:
                         ),
                         barmode='group',
                         height=500,
-                        hovermode='x unified'
+                        hovermode='closest'
                     )
                     st.plotly_chart(fig_combo, use_container_width=True)
                 
-                # NUEVO: Grafico de distribucion mensual (torta)
+                # Grafico de distribucion mensual (torta)
                 st.subheader(f"Distribucion Mensual del Año {ano_seleccionado}")
                 df_dist_mensual = get_distribucion_mensual_anual(ano_seleccionado)
                 if not df_dist_mensual.empty:
@@ -317,7 +320,7 @@ try:
                 st.subheader("Evolucion Mensual")
                 df_evolucion = get_evolucion_mensual()
                 if not df_evolucion.empty:
-                    df_evolucion['promedio_trabajo'] = df_evolucion['total_dinero'] / df_evolucion['cantidad_trabajos']
+                    df_evolucion['promedio_trabajo'] = (df_evolucion['total_dinero'] / df_evolucion['cantidad_trabajos']).round(0)
                     
                     # Grafico 1: Cantidad de trabajos
                     fig_trabajos = px.line(
@@ -376,8 +379,8 @@ try:
             with tab3:
                 st.subheader("Tabla Detallada")
                 df_display = df_resumen.copy()
-                df_display['total_dinero'] = df_display['total_dinero'].apply(lambda x: f"${x:,.0f}")
-                df_display['promedio_trabajo'] = df_display['promedio_trabajo'].apply(lambda x: f"${x:,.0f}")
+                df_display['total_dinero'] = df_display['total_dinero'].apply(lambda x: f"${int(x):,}")
+                df_display['promedio_trabajo'] = df_display['promedio_trabajo'].apply(lambda x: f"${int(x):,}")
                 df_display['porcentaje'] = df_display['porcentaje'].apply(lambda x: f"{x:.2f}%")
                 df_display.columns = ['Año', 'Mes', 'Categoria', 'Cantidad Trabajos', 'Total Ingresos (con IVA)', 'Promedio por Trabajo', 'Porcentaje']
                 st.dataframe(df_display, use_container_width=True, height=600)
