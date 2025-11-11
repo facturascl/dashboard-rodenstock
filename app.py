@@ -33,10 +33,15 @@ def get_bigquery_client():
         return None
 
 @st.cache_data(ttl=600)
-def get_resumen_mensual(ano=None, mes=None):
+def get_datos_unificados(ano=None, mes=None):
+    """
+    FUENTE UNICA DE VERDAD: Esta función genera todos los datos
+    para tabla detallada Y gráficos de evolución desde la MISMA query.
+    """
     client = get_bigquery_client()
     if client is None:
         return pd.DataFrame()
+    
     filtros = ["f.fechaemision IS NOT NULL"]
     if ano:
         filtros.append(f"EXTRACT(YEAR FROM f.fechaemision) = {ano}")
@@ -44,11 +49,13 @@ def get_resumen_mensual(ano=None, mes=None):
         filtros.append(f"EXTRACT(MONTH FROM f.fechaemision) = {mes}")
     where_clause = " AND ".join(filtros)
     
+    # QUERY UNIFICADA - Misma lógica para TODO
     query = f"""
-    WITH datos AS (
+    WITH datos_base AS (
       SELECT
         EXTRACT(YEAR FROM f.fechaemision) AS ano,
         EXTRACT(MONTH FROM f.fechaemision) AS mes,
+        FORMAT_DATE('%Y-%m', f.fechaemision) AS mes_formato,
         CONCAT(
           COALESCE(lf.clasificacion_categoria, 'Sin Clasificar'),
           ' - ',
@@ -60,21 +67,22 @@ def get_resumen_mensual(ano=None, mes=None):
       JOIN `rodenstock-471300.facturacion.facturas` f
         ON lf.numerofactura = f.numerofactura
       WHERE {where_clause}
-      GROUP BY ano, mes, categoria
+      GROUP BY ano, mes, mes_formato, categoria
     ),
     total_general AS (
       SELECT SUM(cantidad_trabajos) AS total_trabajos
-      FROM datos
+      FROM datos_base
     )
     SELECT
       d.ano,
       d.mes,
+      d.mes_formato,
       d.categoria,
       d.cantidad_trabajos,
       d.total_dinero,
       ROUND(d.total_dinero / d.cantidad_trabajos, 0) AS promedio_trabajo,
       ROUND((d.cantidad_trabajos * 100.0) / tg.total_trabajos, 2) AS porcentaje
-    FROM datos d
+    FROM datos_base d
     CROSS JOIN total_general tg
     ORDER BY d.ano DESC, d.mes DESC, d.total_dinero DESC
     """
@@ -107,30 +115,6 @@ def get_distribucion_mensual_anual(ano):
     FROM datos_mensuales dm
     CROSS JOIN total_anual ta
     ORDER BY dm.mes ASC
-    """
-    return client.query(query).to_dataframe()
-
-@st.cache_data(ttl=600)
-def get_evolucion_mensual():
-    client = get_bigquery_client()
-    if client is None:
-        return pd.DataFrame()
-    query = """
-    SELECT
-      FORMAT_DATE('%Y-%m', f.fechaemision) AS mes,
-      CONCAT(
-        COALESCE(lf.clasificacion_categoria, 'Sin Clasificar'),
-        ' - ',
-        COALESCE(lf.clasificacion_subcategoria, '')
-      ) AS categoria,
-      COUNT(DISTINCT lf.numerofactura) AS cantidad_trabajos,
-      ROUND(SUM(CAST(lf.total_linea AS FLOAT64) * 1.19), 0) AS total_dinero
-    FROM `rodenstock-471300.facturacion.lineas_factura` lf
-    JOIN `rodenstock-471300.facturacion.facturas` f
-      ON lf.numerofactura = f.numerofactura
-    WHERE f.fechaemision IS NOT NULL
-    GROUP BY mes, categoria
-    ORDER BY mes ASC
     """
     return client.query(query).to_dataframe()
 
@@ -224,8 +208,11 @@ try:
                 value=f"${int(totales['promedio_factura'].iloc[0]):,}"
             )
         st.markdown("---")
-        df_resumen = get_resumen_mensual(ano_seleccionado, mes_seleccionado)
-        if not df_resumen.empty:
+        
+        # FUENTE UNICA: Obtenemos datos desde una sola función
+        df_datos = get_datos_unificados(ano_seleccionado, mes_seleccionado)
+        
+        if not df_datos.empty:
             tab1, tab2, tab3 = st.tabs(["Distribucion", "Evolucion", "Detalle"])
             
             # TAB 1: DISTRIBUCION
@@ -234,7 +221,7 @@ try:
                 col1, col2 = st.columns([2, 1])
                 with col1:
                     fig_barras = px.bar(
-                        df_resumen.sort_values('total_dinero', ascending=False).head(15),
+                        df_datos.sort_values('total_dinero', ascending=False).head(15),
                         x='categoria',
                         y='cantidad_trabajos',
                         color='categoria',
@@ -246,7 +233,7 @@ try:
                     st.plotly_chart(fig_barras, use_container_width=True)
                 with col2:
                     fig_pie = px.pie(
-                        df_resumen.head(10),
+                        df_datos.head(10),
                         values='total_dinero',
                         names='categoria',
                         title='Distribucion de Ingresos (Top 10)',
@@ -315,76 +302,72 @@ try:
                     )
                     st.plotly_chart(fig_pie_mensual, use_container_width=True)
             
-            # TAB 2: EVOLUCION
+            # TAB 2: EVOLUCION (USA LOS MISMOS DATOS)
             with tab2:
                 st.subheader("Evolucion Mensual")
-                df_evolucion = get_evolucion_mensual()
-                if not df_evolucion.empty:
-                    df_evolucion['promedio_trabajo'] = (df_evolucion['total_dinero'] / df_evolucion['cantidad_trabajos']).round(0)
-                    
-                    # Grafico 1: Cantidad de trabajos
-                    fig_trabajos = px.line(
-                        df_evolucion,
-                        x='mes',
-                        y='cantidad_trabajos',
-                        color='categoria',
-                        title='Cantidad de Trabajos por Mes',
-                        labels={'cantidad_trabajos': 'Cantidad', 'mes': 'Mes'},
-                        height=450,
-                        markers=True
-                    )
-                    fig_trabajos.update_traces(
-                        customdata=df_evolucion[['total_dinero', 'promedio_trabajo']],
-                        hovertemplate='<b>%{fullData.name}</b><br>Mes: %{x}<br>Cantidad: %{y}<br>Total: $%{customdata[0]:,.0f}<br>Promedio: $%{customdata[1]:,.0f}<extra></extra>'
-                    )
-                    st.plotly_chart(fig_trabajos, use_container_width=True)
-                    
-                    # Grafico 2: Total por mes
-                    fig_total = px.line(
-                        df_evolucion,
-                        x='mes',
-                        y='total_dinero',
-                        color='categoria',
-                        title='Total de Ingresos por Mes',
-                        labels={'total_dinero': 'Ingresos', 'mes': 'Mes'},
-                        height=450,
-                        markers=True
-                    )
-                    fig_total.update_traces(
-                        customdata=df_evolucion[['cantidad_trabajos', 'promedio_trabajo']],
-                        hovertemplate='<b>%{fullData.name}</b><br>Mes: %{x}<br>Total: $%{y:,.0f}<br>Cantidad: %{customdata[0]}<br>Promedio: $%{customdata[1]:,.0f}<extra></extra>'
-                    )
-                    st.plotly_chart(fig_total, use_container_width=True)
-                    
-                    # Grafico 3: Promedio por trabajo
-                    fig_promedio = px.line(
-                        df_evolucion,
-                        x='mes',
-                        y='promedio_trabajo',
-                        color='categoria',
-                        title='Promedio por Trabajo',
-                        labels={'promedio_trabajo': 'Promedio ($)', 'mes': 'Mes'},
-                        height=450,
-                        markers=True
-                    )
-                    fig_promedio.update_traces(
-                        customdata=df_evolucion[['cantidad_trabajos', 'total_dinero']],
-                        hovertemplate='<b>%{fullData.name}</b><br>Mes: %{x}<br>Promedio: $%{y:,.0f}<br>Cantidad: %{customdata[0]}<br>Total: $%{customdata[1]:,.0f}<extra></extra>'
-                    )
-                    st.plotly_chart(fig_promedio, use_container_width=True)
-                else:
-                    st.warning("No hay datos de evolucion disponibles.")
+                
+                # Grafico 1: Cantidad de trabajos
+                fig_trabajos = px.line(
+                    df_datos,
+                    x='mes_formato',
+                    y='cantidad_trabajos',
+                    color='categoria',
+                    title='Cantidad de Trabajos por Mes',
+                    labels={'cantidad_trabajos': 'Cantidad', 'mes_formato': 'Mes'},
+                    height=450,
+                    markers=True
+                )
+                fig_trabajos.update_traces(
+                    customdata=df_datos[['total_dinero', 'promedio_trabajo']],
+                    hovertemplate='<b>%{fullData.name}</b><br>Mes: %{x}<br>Cantidad: %{y}<br>Total: $%{customdata[0]:,.0f}<br>Promedio: $%{customdata[1]:,.0f}<extra></extra>'
+                )
+                st.plotly_chart(fig_trabajos, use_container_width=True)
+                
+                # Grafico 2: Total por mes
+                fig_total = px.line(
+                    df_datos,
+                    x='mes_formato',
+                    y='total_dinero',
+                    color='categoria',
+                    title='Total de Ingresos por Mes',
+                    labels={'total_dinero': 'Ingresos', 'mes_formato': 'Mes'},
+                    height=450,
+                    markers=True
+                )
+                fig_total.update_traces(
+                    customdata=df_datos[['cantidad_trabajos', 'promedio_trabajo']],
+                    hovertemplate='<b>%{fullData.name}</b><br>Mes: %{x}<br>Total: $%{y:,.0f}<br>Cantidad: %{customdata[0]}<br>Promedio: $%{customdata[1]:,.0f}<extra></extra>'
+                )
+                st.plotly_chart(fig_total, use_container_width=True)
+                
+                # Grafico 3: Promedio por trabajo
+                fig_promedio = px.line(
+                    df_datos,
+                    x='mes_formato',
+                    y='promedio_trabajo',
+                    color='categoria',
+                    title='Promedio por Trabajo',
+                    labels={'promedio_trabajo': 'Promedio ($)', 'mes_formato': 'Mes'},
+                    height=450,
+                    markers=True
+                )
+                fig_promedio.update_traces(
+                    customdata=df_datos[['cantidad_trabajos', 'total_dinero']],
+                    hovertemplate='<b>%{fullData.name}</b><br>Mes: %{x}<br>Promedio: $%{y:,.0f}<br>Cantidad: %{customdata[0]}<br>Total: $%{customdata[1]:,.0f}<extra></extra>'
+                )
+                st.plotly_chart(fig_promedio, use_container_width=True)
             
-            # TAB 3: TABLA
+            # TAB 3: TABLA (USA LOS MISMOS DATOS)
             with tab3:
                 st.subheader("Tabla Detallada")
-                df_display = df_resumen.copy()
+                df_display = df_datos.copy()
                 df_display['total_dinero'] = df_display['total_dinero'].apply(lambda x: f"${int(x):,}")
                 df_display['promedio_trabajo'] = df_display['promedio_trabajo'].apply(lambda x: f"${int(x):,}")
                 df_display['porcentaje'] = df_display['porcentaje'].apply(lambda x: f"{x:.2f}%")
+                df_display = df_display[['ano', 'mes', 'categoria', 'cantidad_trabajos', 'total_dinero', 'promedio_trabajo', 'porcentaje']]
                 df_display.columns = ['Año', 'Mes', 'Categoria', 'Cantidad Trabajos', 'Total Ingresos (con IVA)', 'Promedio por Trabajo', 'Porcentaje']
                 st.dataframe(df_display, use_container_width=True, height=600)
-                csv = df_resumen.to_csv(index=False).encode('utf-8')
+                csv = df_datos.to_csv(index=False).encode('utf-8')
                 st.download_button(
                     label="Descargar CSV",
                     data=csv,
