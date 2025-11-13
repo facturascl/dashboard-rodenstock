@@ -35,8 +35,8 @@ def get_bigquery_client():
 @st.cache_data(ttl=600)
 def get_datos_unificados(ano=None, mes=None):
     """
-    FUENTE UNICA DE VERDAD: Esta función genera todos los datos
-    para tabla detallada Y gráficos de evolución desde la MISMA query.
+    FUENTE UNICA DE VERDAD para tabla y gráficos
+    SIN porcentaje en evolución (solo para vista detallada)
     """
     client = get_bigquery_client()
     if client is None:
@@ -49,7 +49,46 @@ def get_datos_unificados(ano=None, mes=None):
         filtros.append(f"EXTRACT(MONTH FROM f.fechaemision) = {mes}")
     where_clause = " AND ".join(filtros)
     
-    # QUERY UNIFICADA - Misma lógica para TODO
+    # QUERY UNIFICADA - Sin porcentaje en evolución
+    query = f"""
+    SELECT
+      EXTRACT(YEAR FROM f.fechaemision) AS ano,
+      EXTRACT(MONTH FROM f.fechaemision) AS mes,
+      FORMAT_DATE('%Y-%m', f.fechaemision) AS mes_formato,
+      CONCAT(
+        COALESCE(lf.clasificacion_categoria, 'Sin Clasificar'),
+        ' - ',
+        COALESCE(lf.clasificacion_subcategoria, '')
+      ) AS categoria,
+      COUNT(DISTINCT lf.numerofactura) AS cantidad_trabajos,
+      ROUND(SUM(CAST(lf.total_linea AS FLOAT64) * 1.19), 0) AS total_dinero
+    FROM `rodenstock-471300.facturacion.lineas_factura` lf
+    JOIN `rodenstock-471300.facturacion.facturas` f
+      ON lf.numerofactura = f.numerofactura
+    WHERE {where_clause}
+    GROUP BY ano, mes, mes_formato, categoria
+    ORDER BY mes_formato ASC, categoria
+    """
+    return client.query(query).to_dataframe()
+
+@st.cache_data(ttl=600)
+def get_datos_detalle_con_porcentaje(ano=None, mes=None):
+    """
+    Datos para tabla detallada CON porcentaje
+    Solo se calcula cuando hay filtro específico
+    """
+    client = get_bigquery_client()
+    if client is None:
+        return pd.DataFrame()
+    
+    filtros = ["f.fechaemision IS NOT NULL"]
+    if ano:
+        filtros.append(f"EXTRACT(YEAR FROM f.fechaemision) = {ano}")
+    if mes is not None:
+        filtros.append(f"EXTRACT(MONTH FROM f.fechaemision) = {mes}")
+    where_clause = " AND ".join(filtros)
+    
+    # Query CON porcentaje para tabla detallada
     query = f"""
     WITH datos_base AS (
       SELECT
@@ -209,8 +248,11 @@ try:
             )
         st.markdown("---")
         
-        # FUENTE UNICA: Obtenemos datos desde una sola función
+        # DATOS PARA EVOLUCIÓN (sin porcentaje)
         df_datos = get_datos_unificados(ano_seleccionado, mes_seleccionado)
+        
+        # DATOS PARA TABLA DETALLADA (con porcentaje)
+        df_detalle = get_datos_detalle_con_porcentaje(ano_seleccionado, mes_seleccionado)
         
         if not df_datos.empty:
             tab1, tab2, tab3 = st.tabs(["Distribucion", "Evolucion", "Detalle"])
@@ -302,9 +344,10 @@ try:
                     )
                     st.plotly_chart(fig_pie_mensual, use_container_width=True)
             
-            # TAB 2: EVOLUCION (USA LOS MISMOS DATOS)
+            # TAB 2: EVOLUCION (datos absolutos, sin porcentaje relativo)
             with tab2:
                 st.subheader("Evolucion Mensual")
+                st.info("📊 Los gráficos de evolución muestran valores absolutos por mes y categoría (no porcentajes relativos)")
                 
                 # Grafico 1: Cantidad de trabajos
                 fig_trabajos = px.line(
@@ -317,6 +360,7 @@ try:
                     height=450,
                     markers=True
                 )
+                df_datos['promedio_trabajo'] = (df_datos['total_dinero'] / df_datos['cantidad_trabajos']).round(0)
                 fig_trabajos.update_traces(
                     customdata=df_datos[['total_dinero', 'promedio_trabajo']],
                     hovertemplate='<b>%{fullData.name}</b><br>Mes: %{x}<br>Cantidad: %{y}<br>Total: $%{customdata[0]:,.0f}<br>Promedio: $%{customdata[1]:,.0f}<extra></extra>'
@@ -357,23 +401,24 @@ try:
                 )
                 st.plotly_chart(fig_promedio, use_container_width=True)
             
-            # TAB 3: TABLA (USA LOS MISMOS DATOS)
+            # TAB 3: TABLA DETALLADA (con porcentaje si hay datos)
             with tab3:
                 st.subheader("Tabla Detallada")
-                df_display = df_datos.copy()
-                df_display['total_dinero'] = df_display['total_dinero'].apply(lambda x: f"${int(x):,}")
-                df_display['promedio_trabajo'] = df_display['promedio_trabajo'].apply(lambda x: f"${int(x):,}")
-                df_display['porcentaje'] = df_display['porcentaje'].apply(lambda x: f"{x:.2f}%")
-                df_display = df_display[['ano', 'mes', 'categoria', 'cantidad_trabajos', 'total_dinero', 'promedio_trabajo', 'porcentaje']]
-                df_display.columns = ['Año', 'Mes', 'Categoria', 'Cantidad Trabajos', 'Total Ingresos (con IVA)', 'Promedio por Trabajo', 'Porcentaje']
-                st.dataframe(df_display, use_container_width=True, height=600)
-                csv = df_datos.to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    label="Descargar CSV",
-                    data=csv,
-                    file_name=f'rodenstock_{datetime.now().strftime("%Y%m%d")}.csv',
-                    mime='text/csv',
-                )
+                if not df_detalle.empty:
+                    df_display = df_detalle.copy()
+                    df_display['total_dinero'] = df_display['total_dinero'].apply(lambda x: f"${int(x):,}")
+                    df_display['promedio_trabajo'] = df_display['promedio_trabajo'].apply(lambda x: f"${int(x):,}")
+                    df_display['porcentaje'] = df_display['porcentaje'].apply(lambda x: f"{x:.2f}%")
+                    df_display = df_display[['ano', 'mes', 'categoria', 'cantidad_trabajos', 'total_dinero', 'promedio_trabajo', 'porcentaje']]
+                    df_display.columns = ['Año', 'Mes', 'Categoria', 'Cantidad Trabajos', 'Total Ingresos (con IVA)', 'Promedio por Trabajo', 'Porcentaje']
+                    st.dataframe(df_display, use_container_width=True, height=600)
+                    csv = df_detalle.to_csv(index=False).encode('utf-8')
+                    st.download_button(
+                        label="Descargar CSV",
+                        data=csv,
+                        file_name=f'rodenstock_{datetime.now().strftime("%Y%m%d")}.csv',
+                        mime='text/csv',
+                    )
         else:
             st.warning("No hay datos disponibles para los filtros seleccionados.")
     else:
