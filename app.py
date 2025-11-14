@@ -6,10 +6,6 @@ import plotly.graph_objects as go
 import sqlite3
 import os
 
-# ============================================================================
-# CONFIGURACIÓN BD
-# ============================================================================
-
 DB_FILE = os.getenv('FACTURAS_DB', './facturas.db')
 
 try:
@@ -20,10 +16,6 @@ except Exception as e:
     st.error(f"❌ Error BD: {str(e)}")
     st.stop()
 
-# ============================================================================
-# CONFIG STREAMLIT
-# ============================================================================
-
 st.set_page_config(
     page_title="Dashboard Rodenstock",
     page_icon="📊",
@@ -31,16 +23,11 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ============================================================================
-# FUNCIONES DB - SIN CAST
-# ============================================================================
-
 def get_conn():
     return sqlite3.connect(DB_FILE)
 
 @st.cache_data(ttl=600)
 def get_anos_disponibles():
-    """Años disponibles en BD - SIN CAST"""
     conn = get_conn()
     try:
         query = """
@@ -54,21 +41,18 @@ def get_anos_disponibles():
         if not df.empty and not df['ano'].isna().all():
             anos = sorted([str(x).strip() for x in df['ano'].dropna() if x])
             return sorted(anos, reverse=True)
-    except Exception as e:
+    except:
         conn.close()
-
-    # Fallback completo
     return ['2025', '2024', '2023', '2022']
 
 @st.cache_data(ttl=600)
 def get_meses_por_ano(ano):
-    """Meses del año seleccionado"""
     conn = get_conn()
     try:
         query = f"""
         SELECT DISTINCT SUBSTR(fechaemision, 6, 2) AS mes
         FROM facturas
-        WHERE fechaemision LIKE '{ano}-%'
+        WHERE SUBSTR(fechaemision, 1, 4) = '{ano}'
         AND fechaemision IS NOT NULL
         ORDER BY mes
         """
@@ -78,7 +62,6 @@ def get_meses_por_ano(ano):
             return sorted([str(x).strip() for x in df['mes'].dropna() if x])
     except:
         conn.close()
-
     return []
 
 def format_currency(value):
@@ -99,7 +82,6 @@ def mes_nombre(mes_num):
 
 @st.cache_data(ttl=600)
 def get_totales_periodo(ano, mes=None):
-    """Totales generales"""
     conn = get_conn()
     try:
         filtro = f"AND SUBSTR(fechaemision, 6, 2) = '{mes}'" if mes else ""
@@ -111,7 +93,7 @@ def get_totales_periodo(ano, mes=None):
           ROUND(COALESCE(SUM(subtotal + iva), 0), 2) AS total_ingresos,
           ROUND(COALESCE(AVG(subtotal + iva), 0), 2) AS promedio_factura
         FROM facturas
-        WHERE fechaemision LIKE '{ano}-%'
+        WHERE SUBSTR(fechaemision, 1, 4) = '{ano}'
           AND fechaemision IS NOT NULL
           {filtro}
         """
@@ -124,7 +106,6 @@ def get_totales_periodo(ano, mes=None):
 
 @st.cache_data(ttl=600)
 def get_evolucion_mensual(ano):
-    """Evolución mensual"""
     conn = get_conn()
     try:
         query = f"""
@@ -133,7 +114,7 @@ def get_evolucion_mensual(ano):
           COUNT(DISTINCT f.numerofactura) AS cantidad_facturas,
           ROUND(COALESCE(SUM(f.subtotal + f.iva), 0), 2) AS total_mes
         FROM facturas f
-        WHERE f.fechaemision LIKE '{ano}-%'
+        WHERE SUBSTR(f.fechaemision, 1, 4) = '{ano}'
         AND f.fechaemision IS NOT NULL
         GROUP BY mes
         ORDER BY mes
@@ -149,7 +130,6 @@ def get_evolucion_mensual(ano):
 
 @st.cache_data(ttl=600)
 def get_categorias_por_periodo(ano, mes=None):
-    """Categorías"""
     conn = get_conn()
     try:
         filtro_mes = f"AND SUBSTR(f.fechaemision, 6, 2) = '{mes}'" if mes else ""
@@ -169,7 +149,7 @@ def get_categorias_por_periodo(ano, mes=None):
             COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0) AS total_factura
           FROM lineas_factura lf
           INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
-          WHERE f.fechaemision LIKE '{ano}-%'
+          WHERE SUBSTR(f.fechaemision, 1, 4) = '{ano}'
             AND f.fechaemision IS NOT NULL
             {filtro_mes}
           GROUP BY f.numerofactura, f.fechaemision, categoria, total_factura
@@ -207,7 +187,6 @@ def get_categorias_por_periodo(ano, mes=None):
 
 @st.cache_data(ttl=600)
 def get_subcategorias_por_periodo(ano, mes=None, categoria=None):
-    """Subcategorías"""
     conn = get_conn()
     try:
         filtro_mes = f"AND SUBSTR(f.fechaemision, 6, 2) = '{mes}'" if mes else ""
@@ -223,7 +202,7 @@ def get_subcategorias_por_periodo(ano, mes=None, categoria=None):
             COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0) AS total_factura
           FROM lineas_factura lf
           INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
-          WHERE f.fechaemision LIKE '{ano}-%'
+          WHERE SUBSTR(f.fechaemision, 1, 4) = '{ano}'
             AND f.fechaemision IS NOT NULL
             AND lf.clasificacion_categoria IS NOT NULL
             {filtro_mes}
@@ -254,18 +233,13 @@ def get_subcategorias_por_periodo(ano, mes=None, categoria=None):
 st.title("📊 Dashboard de Facturación Rodenstock")
 st.markdown("---")
 
-# SIDEBAR
 with st.sidebar:
     st.header("🔧 Filtros")
 
     anos_disponibles = get_anos_disponibles()
-    st.write(f"**Años encontrados:** {anos_disponibles}")
-
     ano_seleccionado = st.selectbox("📅 Año", options=anos_disponibles, index=0)
 
     meses_disponibles = get_meses_por_ano(ano_seleccionado)
-    st.write(f"**Meses en {ano_seleccionado}:** {meses_disponibles}")
-
     mes_options = ["Todos"] + meses_disponibles
     mes_seleccionado = st.selectbox("📆 Mes", options=mes_options, index=0)
 
@@ -276,7 +250,6 @@ with st.sidebar:
         st.cache_data.clear()
         st.rerun()
 
-# HEADER
 st.header("📈 Resumen General")
 totales = get_totales_periodo(ano_seleccionado, mes_param)
 
@@ -292,13 +265,11 @@ else:
 
 st.markdown("---")
 
-# TABS
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "📊 Evolución", "🏆 Categorías", "🎯 Subcategorías", 
     "📈 Pareto", "⚡ Comparativa", "📋 Tabla"
 ])
 
-# TAB 1
 with tab1:
     st.subheader(f"Evolución Mensual {ano_seleccionado}")
     df_mes = get_evolucion_mensual(ano_seleccionado)
@@ -312,7 +283,6 @@ with tab1:
     else:
         st.info("Sin datos")
 
-# TAB 2
 with tab2:
     st.subheader("Categorías")
     df_cat = get_categorias_por_periodo(ano_seleccionado, mes_param)
@@ -328,7 +298,6 @@ with tab2:
     else:
         st.info("Sin datos")
 
-# TAB 3
 with tab3:
     st.subheader("Subcategorías")
     df_cat = get_categorias_por_periodo(ano_seleccionado, mes_param)
@@ -345,7 +314,6 @@ with tab3:
     else:
         st.info("Sin datos")
 
-# TAB 4
 with tab4:
     st.subheader("Análisis Pareto")
     df_cat = get_categorias_por_periodo(ano_seleccionado, mes_param)
@@ -364,7 +332,6 @@ with tab4:
     else:
         st.info("Sin datos")
 
-# TAB 5
 with tab5:
     st.subheader("Comparativa")
     df_cat = get_categorias_por_periodo(ano_seleccionado, mes_param)
@@ -373,7 +340,6 @@ with tab5:
     else:
         st.info("Sin datos")
 
-# TAB 6
 with tab6:
     st.subheader("Detalle Completo")
     df_sub = get_subcategorias_por_periodo(ano_seleccionado, mes_param)
