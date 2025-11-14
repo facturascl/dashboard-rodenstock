@@ -16,8 +16,11 @@ st.title("📊 Dashboard Rodenstock - Análisis de Facturas")
 # ============================================================
 # CONEXIÓN A BD
 # ============================================================
-conn = sqlite3.connect('facturas.db')
-cursor = conn.cursor()
+@st.cache_resource
+def get_conn():
+    return sqlite3.connect('facturas.db')
+
+conn = get_conn()
 
 # ============================================================
 # SIDEBAR - FILTROS PRINCIPALES
@@ -28,7 +31,8 @@ try:
     # Obtener años disponibles
     anos_query = """
         SELECT DISTINCT CAST(STRFTIME('%Y', fechaemision) AS INTEGER) as ano
-        FROM facturas WHERE fechaemision IS NOT NULL
+        FROM facturas 
+        WHERE fechaemision IS NOT NULL
         ORDER BY ano DESC
     """
     anos_df = pd.read_sql_query(anos_query, conn)
@@ -38,7 +42,7 @@ try:
     ano1 = st.sidebar.selectbox("📅 Año 1", anos_disponibles, index=0, key="ano1")
     ano2 = st.sidebar.selectbox("📅 Año 2 (Comparar)", anos_disponibles, index=min(1, len(anos_disponibles)-1), key="ano2")
     
-    # ⭐ DROPDOWN MENSUAL - AQUÍ ESTÁ LA SOLUCIÓN
+    # ⭐ DROPDOWN MENSUAL
     st.sidebar.divider()
     meses_nombres = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 
                      'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
@@ -50,86 +54,100 @@ try:
     )
     
 except Exception as e:
-    st.error(f"Error al cargar filtros: {e}")
+    st.error(f"❌ Error al cargar filtros: {e}")
     st.stop()
 
 # ============================================================
-# FUNCIONES AUXILIARES
+# FUNCIONES AUXILIARES - QUERIES CORREGIDAS
 # ============================================================
 
 def get_annual_data(year):
     """Obtiene datos anuales por mes"""
     query = f"""
-        SELECT 
-            CAST(STRFTIME('%m', fechaemision) AS INTEGER) as mes,
-            COUNT(*) as cantidad,
-            ROUND(AVG(monto), 2) as promedio,
-            ROUND(SUM(monto), 2) as total
-        FROM facturas
-        WHERE CAST(STRFTIME('%Y', fechaemision) AS INTEGER) = {year}
-        GROUP BY mes
-        ORDER BY mes
+    SELECT 
+        CAST(strftime('%m', fechaemision) AS INTEGER) as mes,
+        COUNT(*) as cantidad,
+        ROUND(AVG(monto), 2) as promedio,
+        ROUND(SUM(monto), 2) as total
+    FROM facturas
+    WHERE strftime('%Y', fechaemision) = '{year}'
+    AND fechaemision IS NOT NULL
+    GROUP BY mes
+    ORDER BY mes
     """
-    return pd.read_sql_query(query, conn)
+    try:
+        return pd.read_sql_query(query, conn)
+    except Exception as e:
+        st.error(f"Error en get_annual_data: {e}")
+        return pd.DataFrame()
 
-def get_subcategory_data(year, month, categories=None):
+def get_subcategory_data(year, month):
     """Obtiene desglose por subcategoría"""
-    where_clause = f"CAST(STRFTIME('%Y', f.fechaemision) AS INTEGER) = {year}"
-    where_clause += f" AND CAST(STRFTIME('%m', f.fechaemision) AS INTEGER) = {month}"
-    
-    if categories:
-        cat_list = "', '".join(categories)
-        where_clause += f" AND lf.clasificacion_categoria IN ('{cat_list}')"
-    
     query = f"""
-        SELECT 
-            lf.clasificacion_subcategoria as subcategoria,
-            COUNT(*) as cantidad,
-            ROUND(AVG(lf.monto), 2) as promedio,
-            ROUND(SUM(lf.monto), 2) as total
-        FROM lineas_factura lf
-        JOIN facturas f ON lf.id_factura = f.id
-        WHERE {where_clause}
-        GROUP BY subcategoria
-        ORDER BY total DESC
+    SELECT 
+        lf.clasificacion_subcategoria as subcategoria,
+        COUNT(*) as cantidad,
+        ROUND(AVG(lf.monto), 2) as promedio,
+        ROUND(SUM(lf.monto), 2) as total
+    FROM lineas_factura lf
+    JOIN facturas f ON lf.id_factura = f.id
+    WHERE strftime('%Y', f.fechaemision) = '{year}'
+    AND strftime('%m', f.fechaemision) = PRINTF('%02d', {month})
+    AND f.fechaemision IS NOT NULL
+    GROUP BY subcategoria
+    ORDER BY total DESC
     """
-    return pd.read_sql_query(query, conn)
-
-def get_category_analysis(year, month, category):
-    """Obtiene análisis por categoría (Newton/Progresivo)"""
-    query = f"""
-        SELECT 
-            lf.clasificacion_categoria,
-            COUNT(*) as cantidad,
-            ROUND(AVG(lf.monto), 2) as promedio,
-            ROUND(SUM(lf.monto), 2) as total
-        FROM lineas_factura lf
-        JOIN facturas f ON lf.id_factura = f.id
-        WHERE CAST(STRFTIME('%Y', f.fechaemision) AS INTEGER) = {year}
-            AND CAST(STRFTIME('%m', f.fechaemision) AS INTEGER) = {month}
-            AND lf.clasificacion_categoria IN ('Newton', 'Newton Plus', 'Progresivo')
-        GROUP BY lf.clasificacion_categoria
-        ORDER BY total DESC
-    """
-    return pd.read_sql_query(query, conn)
+    try:
+        return pd.read_sql_query(query, conn)
+    except Exception as e:
+        st.error(f"Error en get_subcategory_data: {e}")
+        return pd.DataFrame()
 
 def get_daily_newton_data(year, month):
     """Obtiene datos diarios de Newton vs Plus"""
     query = f"""
-        SELECT 
-            CAST(STRFTIME('%d', f.fechaemision) AS INTEGER) as dia,
-            lf.clasificacion_categoria,
-            COUNT(*) as cantidad,
-            ROUND(AVG(lf.monto), 2) as promedio
-        FROM lineas_factura lf
-        JOIN facturas f ON lf.id_factura = f.id
-        WHERE CAST(STRFTIME('%Y', f.fechaemision) AS INTEGER) = {year}
-            AND CAST(STRFTIME('%m', f.fechaemision) AS INTEGER) = {month}
-            AND lf.clasificacion_categoria IN ('Newton', 'Newton Plus')
-        GROUP BY dia, lf.clasificacion_categoria
-        ORDER BY dia
+    SELECT 
+        CAST(strftime('%d', f.fechaemision) AS INTEGER) as dia,
+        lf.clasificacion_categoria,
+        COUNT(*) as cantidad,
+        ROUND(AVG(lf.monto), 2) as promedio
+    FROM lineas_factura lf
+    JOIN facturas f ON lf.id_factura = f.id
+    WHERE strftime('%Y', f.fechaemision) = '{year}'
+    AND strftime('%m', f.fechaemision) = PRINTF('%02d', {month})
+    AND lf.clasificacion_categoria IN ('Newton', 'Newton Plus')
+    AND f.fechaemision IS NOT NULL
+    GROUP BY dia, lf.clasificacion_categoria
+    ORDER BY dia
     """
-    return pd.read_sql_query(query, conn)
+    try:
+        return pd.read_sql_query(query, conn)
+    except Exception as e:
+        st.error(f"Error en get_daily_newton_data: {e}")
+        return pd.DataFrame()
+
+def get_category_analysis(year, month):
+    """Obtiene análisis por categoría (Newton/Progresivo)"""
+    query = f"""
+    SELECT 
+        lf.clasificacion_categoria,
+        COUNT(*) as cantidad,
+        ROUND(AVG(lf.monto), 2) as promedio,
+        ROUND(SUM(lf.monto), 2) as total
+    FROM lineas_factura lf
+    JOIN facturas f ON lf.id_factura = f.id
+    WHERE strftime('%Y', f.fechaemision) = '{year}'
+    AND strftime('%m', f.fechaemision) = PRINTF('%02d', {month})
+    AND lf.clasificacion_categoria IN ('Newton', 'Newton Plus', 'Progresivo')
+    AND f.fechaemision IS NOT NULL
+    GROUP BY lf.clasificacion_categoria
+    ORDER BY total DESC
+    """
+    try:
+        return pd.read_sql_query(query, conn)
+    except Exception as e:
+        st.error(f"Error en get_category_analysis: {e}")
+        return pd.DataFrame()
 
 # ============================================================
 # TABS PRINCIPALES
@@ -168,8 +186,9 @@ with tab1:
                 height=400
             )
             st.plotly_chart(fig1, use_container_width=True)
-            
             st.dataframe(data1, use_container_width=True)
+        else:
+            st.info(f"Sin datos para {ano1}")
     
     with col2:
         st.subheader(f"Año {ano2}")
@@ -189,14 +208,15 @@ with tab1:
                 height=400
             )
             st.plotly_chart(fig2, use_container_width=True)
-            
             st.dataframe(data2, use_container_width=True)
+        else:
+            st.info(f"Sin datos para {ano2}")
 
 # ============================================================
 # TAB 2: DESGLOSE SUBCATEGORÍAS
 # ============================================================
 with tab2:
-    st.header(f"🏷️ Desglose Subcategorías - Año {ano1}, Mes {meses_nombres[mes_seleccionado-1]}")
+    st.header(f"🏷️ Desglose Subcategorías - {meses_nombres[mes_seleccionado-1]} {ano1}")
     
     data_sub = get_subcategory_data(ano1, mes_seleccionado)
     
@@ -208,7 +228,7 @@ with tab2:
                 data_sub,
                 values='total',
                 names='subcategoria',
-                title=f"Distribución por Subcategoría ({meses_nombres[mes_seleccionado-1]} {ano1})"
+                title=f"Distribución por Subcategoría"
             )
             st.plotly_chart(fig_pie, use_container_width=True)
         
@@ -216,19 +236,18 @@ with tab2:
             fig_bar = px.bar(
                 data_sub,
                 x='subcategoria',
-                y=['cantidad', 'promedio'],
-                title="Cantidad y Promedio por Subcategoría",
-                barmode='group'
+                y='cantidad',
+                title="Cantidad por Subcategoría"
             )
             st.plotly_chart(fig_bar, use_container_width=True)
         
-        st.subheader("Detalle de Subcategorías")
+        st.subheader("Detalle")
         st.dataframe(data_sub, use_container_width=True)
     else:
         st.warning(f"No hay datos para {meses_nombres[mes_seleccionado-1]} de {ano1}")
 
 # ============================================================
-# TAB 3: NEWTON VS PLUS (GRÁFICO ÚNICO)
+# TAB 3: NEWTON VS PLUS
 # ============================================================
 with tab3:
     st.header(f"📈 Newton vs Newton Plus - {meses_nombres[mes_seleccionado-1]} {ano1}")
@@ -236,126 +255,77 @@ with tab3:
     newton_data = get_daily_newton_data(ano1, mes_seleccionado)
     
     if not newton_data.empty:
-        # Preparar datos para gráfico combinado
-        newton_df = newton_data[newton_data['clasificacion_categoria'] == 'Newton'].sort_values('dia')
-        plus_df = newton_data[newton_data['clasificacion_categoria'] == 'Newton Plus'].sort_values('dia')
-        
         fig = go.Figure()
         
-        # Barras para cantidad - Newton
+        # Datos Newton
+        newton_df = newton_data[newton_data['clasificacion_categoria'] == 'Newton']
+        plus_df = newton_data[newton_data['clasificacion_categoria'] == 'Newton Plus']
+        
+        # Barras cantidad
         fig.add_trace(go.Bar(
             x=newton_df['dia'],
             y=newton_df['cantidad'],
-            name='Newton - Cantidad',
-            marker_color='rgb(55, 83, 109)',
-            xaxis='x',
-            yaxis='y'
+            name='Newton',
+            marker_color='lightblue'
         ))
         
-        # Barras para cantidad - Newton Plus
         fig.add_trace(go.Bar(
             x=plus_df['dia'],
             y=plus_df['cantidad'],
-            name='Newton Plus - Cantidad',
-            marker_color='rgb(26, 118, 255)',
-            xaxis='x',
-            yaxis='y'
-        ))
-        
-        # Línea para promedio - Newton
-        fig.add_trace(go.Scatter(
-            x=newton_df['dia'],
-            y=newton_df['promedio'],
-            name='Newton - Promedio',
-            mode='lines+markers',
-            line=dict(color='rgb(255, 0, 0)', width=2),
-            xaxis='x',
-            yaxis='y2'
-        ))
-        
-        # Línea para promedio - Newton Plus
-        fig.add_trace(go.Scatter(
-            x=plus_df['dia'],
-            y=plus_df['promedio'],
-            name='Newton Plus - Promedio',
-            mode='lines+markers',
-            line=dict(color='rgb(50, 171, 96)', width=2),
-            xaxis='x',
-            yaxis='y2'
+            name='Newton Plus',
+            marker_color='salmon'
         ))
         
         fig.update_layout(
-            title=f"Newton vs Newton Plus - {meses_nombres[mes_seleccionado-1]} {ano1}",
-            xaxis=dict(title="Día del mes"),
-            yaxis=dict(title="Cantidad de facturas", side='left'),
-            yaxis2=dict(title="Promedio ($)", overlaying='y', side='right'),
-            height=500,
-            hovermode='x unified'
+            title=f"Newton vs Newton Plus",
+            xaxis_title="Día",
+            yaxis_title="Cantidad",
+            barmode='group',
+            height=500
         )
         
         st.plotly_chart(fig, use_container_width=True)
-        
-        # Tabla de resumen
-        st.subheader("Resumen diario")
         st.dataframe(newton_data.sort_values('dia'), use_container_width=True)
     else:
         st.warning(f"No hay datos de Newton para {meses_nombres[mes_seleccionado-1]} de {ano1}")
 
 # ============================================================
-# TAB 4: ANÁLISIS SUBCATEGORÍAS (NEWTON + PROGRESIVO)
+# TAB 4: ANÁLISIS CATEGORÍAS
 # ============================================================
 with tab4:
-    st.header(f"📍 Análisis Newton + Progresivo - Año {ano1}, Mes {meses_nombres[mes_seleccionado-1]}")
+    st.header(f"📍 Análisis Newton + Progresivo - {meses_nombres[mes_seleccionado-1]} {ano1}")
     
-    category_data = get_category_analysis(ano1, mes_seleccionado, ['Newton', 'Newton Plus', 'Progresivo'])
+    cat_data = get_category_analysis(ano1, mes_seleccionado)
     
-    if not category_data.empty:
+    if not cat_data.empty:
         col1, col2 = st.columns(2)
         
         with col1:
             fig_pie = px.pie(
-                category_data,
+                cat_data,
                 values='total',
                 names='clasificacion_categoria',
-                title=f"Distribución: Newton, Plus y Progresivo"
+                title="Distribución: Newton, Plus y Progresivo"
             )
             st.plotly_chart(fig_pie, use_container_width=True)
         
         with col2:
             fig_bar = px.bar(
-                category_data,
+                cat_data,
                 x='clasificacion_categoria',
-                y=['cantidad', 'promedio'],
-                title="Cantidad y Promedio por Categoría",
-                barmode='group',
-                color_discrete_sequence=['lightblue', 'salmon']
+                y='cantidad',
+                title="Cantidad por Categoría"
             )
             st.plotly_chart(fig_bar, use_container_width=True)
         
         st.subheader("Detalle por Categoría")
-        
-        # Mostrar métricas
-        for idx, row in category_data.iterrows():
-            with st.container():
-                col1, col2, col3, col4 = st.columns(4)
-                with col1:
-                    st.metric(f"{row['clasificacion_categoria']} - Cantidad", int(row['cantidad']))
-                with col2:
-                    st.metric(f"{row['clasificacion_categoria']} - Promedio", f"${row['promedio']:,.2f}")
-                with col3:
-                    st.metric(f"{row['clasificacion_categoria']} - Total", f"${row['total']:,.2f}")
-                with col4:
-                    pct = (row['total'] / category_data['total'].sum()) * 100
-                    st.metric(f"{row['clasificacion_categoria']} - %", f"{pct:.1f}%")
-        
-        st.dataframe(category_data, use_container_width=True)
+        st.dataframe(cat_data, use_container_width=True)
     else:
-        st.warning(f"No hay datos de Newton/Progresivo para {meses_nombres[mes_seleccionado-1]} de {ano1}")
+        st.warning(f"No hay datos para {meses_nombres[mes_seleccionado-1]} de {ano1}")
 
 # ============================================================
 # FOOTER
 # ============================================================
 st.divider()
-st.markdown("---")
 st.markdown(f"📅 Última actualización: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
-st.markdown("Desarrollado con ❤️ para Rodenstock")
+st.markdown("Desarrollado para Rodenstock ✓")
