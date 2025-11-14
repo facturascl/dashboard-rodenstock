@@ -4,7 +4,6 @@ import sqlite3
 from datetime import datetime, timedelta
 import plotly.graph_objects as go
 import plotly.express as px
-
 import warnings
 warnings.filterwarnings('ignore')
 
