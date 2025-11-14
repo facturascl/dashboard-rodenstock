@@ -2,12 +2,24 @@
 import streamlit as st
 import pandas as pd
 import sqlite3
+import os
 
-DB_FILE = './facturas.db'
+# ✅ RUTA CORRECTA para Streamlit Cloud
+DB_FILE = '/mount/src/dashboard-rodenstock/facturas.db'
+
+# Si estás en local, usa:
+# DB_FILE = './facturas.db'
+
+# O mejor: usa esta lógica que detecta automáticamente
+if not os.path.exists(DB_FILE):
+    DB_FILE = './facturas.db'
+    if not os.path.exists(DB_FILE):
+        DB_FILE = '../facturas.db'
 
 st.set_page_config(page_title="Dashboard Debug", page_icon="🔍", layout="wide")
 
 st.title("🔍 DEBUG Dashboard")
+st.markdown(f"📁 DB: `{DB_FILE}`")
 st.markdown("---")
 
 def get_conn():
