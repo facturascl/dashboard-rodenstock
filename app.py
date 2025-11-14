@@ -1,3 +1,4 @@
+
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -73,22 +74,35 @@ def init_database_if_needed():
     
     factura_num = 1000
     for year in range(2020, 2026):
-        start_date = datetime(year, 1, 1)
         if year == 2025:
-            end_date = datetime(2025, 11, 30)
+            meses_activos = 11  # Enero a Noviembre
         else:
-            end_date = datetime(year, 12, 31)
+            meses_activos = 12
         
         num_facturas = yearly_facturas[year]
-        days_diff = (end_date - start_date).days
+        facturas_por_mes = num_facturas // meses_activos
+        facturas_restantes = num_facturas % meses_activos
         
-        for i in range(num_facturas):
-            random_days = random.randint(0, days_diff)
-            fecha = start_date + timedelta(days=random_days)
-            fecha_str = fecha.strftime('%Y-%m-%d')
+        for mes in range(1, meses_activos + 1):
+            cant_facturas_este_mes = facturas_por_mes + (1 if mes <= facturas_restantes else 0)
             
-            numerofactura = f"FAC{factura_num:06d}"
-            factura_num += 1
+            if mes < 12:
+                proximus_mes = datetime(year, mes + 1, 1)
+            else:
+                proximus_mes = datetime(year + 1, 1, 1)
+            
+            start_date = datetime(year, mes, 1)
+            end_date = proximus_mes - timedelta(days=1)
+            days_diff = (end_date - start_date).days + 1
+            
+            for i in range(cant_facturas_este_mes):
+                posicion = i / max(cant_facturas_este_mes - 1, 1) if cant_facturas_este_mes > 1 else 0.5
+                dia_offset = int(days_diff * posicion)
+                fecha = start_date + timedelta(days=dia_offset)
+                fecha_str = fecha.strftime('%Y-%m-%d')
+                
+                numerofactura = f"FAC{factura_num:06d}"
+                factura_num += 1
             
             subtotal = round(random.uniform(100, 5000), 2)
             iva = round(subtotal * 0.19, 2)
