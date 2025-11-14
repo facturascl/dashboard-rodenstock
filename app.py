@@ -4,17 +4,8 @@ import plotly.graph_objects as go
 import sqlite3
 from datetime import datetime
 
-# Configuración de página
-st.set_page_config(
-    page_title="Dashboard Facturación Rodenstock",
-    page_icon="📊",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+st.set_page_config(page_title="Dashboard Rodenstock", page_icon="📊", layout="wide")
 
-# ============================================================
-# CONEXIÓN A BD
-# ============================================================
 DB_PATH = "facturas.db"
 
 @st.cache_resource
@@ -24,178 +15,176 @@ def get_db_connection():
         conn.row_factory = sqlite3.Row
         return conn
     except Exception as e:
-        st.error(f"Error conectando BD: {e}")
+        st.error(f"❌ Error BD: {e}")
         return None
 
 conn = get_db_connection()
-
 if conn is None:
-    st.error("No se pudo conectar a la base de datos")
     st.stop()
 
 # ============================================================
-# SIDEBAR - FILTROS
+# SIDEBAR - FILTROS PRINCIPALES
 # ============================================================
 st.sidebar.title("🔧 Filtros")
 
 try:
-    # Obtener años disponibles
     anos_query = """
         SELECT DISTINCT CAST(STRFTIME('%Y', fechaemision) AS INTEGER) as ano
-        FROM facturas
-        WHERE fechaemision IS NOT NULL
+        FROM facturas WHERE fechaemision IS NOT NULL
         ORDER BY ano DESC
     """
     anos_df = pd.read_sql_query(anos_query, conn)
-    anos_disponibles = sorted(anos_df['ano'].tolist(), reverse=True) if not anos_df.empty else [datetime.now().year]
+    anos_disponibles = sorted(anos_df['ano'].tolist(), reverse=True) if not anos_df.empty else [2025]
     
-    ano_seleccionado = st.sidebar.selectbox(
-        "Año",
-        options=anos_disponibles,
-        index=0,
-        key="ano_select"
-    )
-    
-    # Obtener meses del año seleccionado
-    meses_query = f"""
-        SELECT DISTINCT CAST(STRFTIME('%m', fechaemision) AS INTEGER) as mes
-        FROM facturas
-        WHERE CAST(STRFTIME('%Y', fechaemision) AS INTEGER) = {int(ano_seleccionado)}
-        AND fechaemision IS NOT NULL
-        ORDER BY mes DESC
-    """
-    meses_df = pd.read_sql_query(meses_query, conn)
-    meses_disponibles = sorted(meses_df['mes'].tolist(), reverse=True) if not meses_df.empty else [datetime.now().month]
-    
-    mes_param = st.sidebar.selectbox(
-        "Mes",
-        options=meses_disponibles,
-        index=0,
-        format_func=lambda x: f"{x:02d}",
-        key="mes_select"
-    )
+    ano_seleccionado = st.sidebar.selectbox("📅 Año para Comparar", ano_disponibles, key="ano_select")
     
 except Exception as e:
-    st.error(f"Error al cargar filtros: {e}")
+    st.error(f"Error al cargar años: {e}")
     st.stop()
 
 # ============================================================
 # FUNCIONES DE CONSULTA
 # ============================================================
 
-@st.cache_data(ttl=600)
-def get_comparativa_meses_anos(mes_param):
-    """Comparativa por mes de todos los años"""
-    try:
-        query = f"""
-        SELECT 
-            CAST(STRFTIME('%Y', fechaemision) AS INTEGER) as ano,
-            CAST(STRFTIME('%m', fechaemision) AS INTEGER) as mes,
-            COUNT(DISTINCT numerofactura) as cantidad_facturas,
-            CAST(SUM(subtotal + iva) AS INTEGER) as total_dinero
-        FROM facturas
-        WHERE CAST(STRFTIME('%m', fechaemision) AS INTEGER) = {int(mes_param)}
-        AND fechaemision IS NOT NULL
-        GROUP BY ano, mes
-        ORDER BY ano DESC
-        """
-        return pd.read_sql_query(query, conn)
-    except Exception as e:
-        st.error(f"Error en comparativa: {e}")
-        return pd.DataFrame()
+@st.cache_data(ttl=300)
+def get_comparativa_12_meses(ano):
+    """Comparativa de 12 meses: cantidad de facturas + línea de dinero"""
+    query = f"""
+    SELECT 
+        CAST(STRFTIME('%m', fechaemision) AS INTEGER) as mes,
+        COUNT(DISTINCT numerofactura) as cantidad_facturas,
+        CAST(SUM(subtotal + iva) AS INTEGER) as total_dinero
+    FROM facturas
+    WHERE CAST(STRFTIME('%Y', fechaemision) AS INTEGER) = {int(ano)}
+    AND fechaemision IS NOT NULL
+    GROUP BY mes
+    ORDER BY mes
+    """
+    return pd.read_sql_query(query, conn)
 
-@st.cache_data(ttl=600)
-def get_subcategorias_desglose(ano_sel, mes_param):
-    """Desglose por subcategoría: cantidad, costo, promedio, %"""
-    try:
-        query = f"""
-        WITH stats_totales AS (
-            SELECT
-                CAST(SUM(CASE WHEN lf.linea_numero = 1 THEN f.subtotal + f.iva ELSE 0 END) AS INTEGER) as total_general
-            FROM lineas_factura lf
-            INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
-            WHERE CAST(STRFTIME('%Y', f.fechaemision) AS INTEGER) = {int(ano_sel)}
-            AND CAST(STRFTIME('%m', f.fechaemision) AS INTEGER) = {int(mes_param)}
-            AND f.fechaemision IS NOT NULL
-        )
-        SELECT 
-            COALESCE(lf.clasificacion_subcategoria, 'Sin subcategoría') as subcategoria,
-            COUNT(DISTINCT lf.numerofactura) as cantidad_facturas,
-            CAST(SUM(CASE WHEN lf.linea_numero = 1 THEN f.subtotal + f.iva ELSE 0 END) AS INTEGER) as total_costo,
-            CAST(AVG(CASE WHEN lf.linea_numero = 1 THEN f.subtotal + f.iva ELSE 0 END) AS INTEGER) as promedio,
-            CAST(100.0 * SUM(CASE WHEN lf.linea_numero = 1 THEN f.subtotal + f.iva ELSE 0 END) / NULLIF((SELECT total_general FROM stats_totales), 0) AS DECIMAL(5,2)) as porcentaje
+@st.cache_data(ttl=300)
+def get_subcategorias_completo(ano):
+    """Todas las subcategorías: cantidad, costo, promedio, porcentaje"""
+    query = f"""
+    WITH stats_totales AS (
+        SELECT CAST(SUM(CASE WHEN lf.linea_numero = 1 THEN f.subtotal + f.iva ELSE 0 END) AS INTEGER) as total_general
         FROM lineas_factura lf
         INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
-        CROSS JOIN stats_totales
-        WHERE CAST(STRFTIME('%Y', f.fechaemision) AS INTEGER) = {int(ano_sel)}
-        AND CAST(STRFTIME('%m', f.fechaemision) AS INTEGER) = {int(mes_param)}
+        WHERE CAST(STRFTIME('%Y', f.fechaemision) AS INTEGER) = {int(ano)}
         AND f.fechaemision IS NOT NULL
-        GROUP BY subcategoria
-        ORDER BY total_costo DESC
-        """
-        return pd.read_sql_query(query, conn)
-    except Exception as e:
-        st.error(f"Error en desglose: {e}")
-        return pd.DataFrame()
+    )
+    SELECT 
+        COALESCE(lf.clasificacion_subcategoria, 'Sin clasificación') as subcategoria,
+        COUNT(DISTINCT lf.numerofactura) as cantidad,
+        CAST(SUM(CASE WHEN lf.linea_numero = 1 THEN f.subtotal + f.iva ELSE 0 END) AS INTEGER) as costo,
+        CAST(AVG(CASE WHEN lf.linea_numero = 1 THEN f.subtotal + f.iva ELSE 0 END) AS INTEGER) as promedio,
+        CAST(100.0 * SUM(CASE WHEN lf.linea_numero = 1 THEN f.subtotal + f.iva ELSE 0 END) / NULLIF((SELECT total_general FROM stats_totales), 0) AS DECIMAL(5,2)) as pct
+    FROM lineas_factura lf
+    INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
+    WHERE CAST(STRFTIME('%Y', f.fechaemision) AS INTEGER) = {int(ano)}
+    AND f.fechaemision IS NOT NULL
+    GROUP BY subcategoria
+    ORDER BY costo DESC
+    """
+    return pd.read_sql_query(query, conn)
+
+@st.cache_data(ttl=300)
+def get_newton_diario(ano):
+    """Newton vs Newton Plus día a día"""
+    query = f"""
+    SELECT 
+        STRFTIME('%Y-%m-%d', f.fechaemision) as fecha,
+        CASE WHEN lf.clasificacion_categoria = 'Newton' THEN 'Newton' ELSE 'Newton Plus' END as tipo,
+        COUNT(DISTINCT lf.numerofactura) as cantidad,
+        CAST(SUM(f.subtotal + f.iva) AS INTEGER) as total
+    FROM lineas_factura lf
+    INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
+    WHERE CAST(STRFTIME('%Y', f.fechaemision) AS INTEGER) = {int(ano)}
+    AND lf.clasificacion_categoria IN ('Newton', 'Newton Plus')
+    AND f.fechaemision IS NOT NULL
+    GROUP BY fecha, tipo
+    ORDER BY fecha DESC, tipo
+    """
+    return pd.read_sql_query(query, conn)
+
+@st.cache_data(ttl=300)
+def get_analisis_categorias(ano):
+    """Análisis por categoría principal"""
+    query = f"""
+    WITH stats_totales AS (
+        SELECT CAST(SUM(f.subtotal + f.iva) AS INTEGER) as total_general
+        FROM facturas f
+        WHERE CAST(STRFTIME('%Y', f.fechaemision) AS INTEGER) = {int(ano)}
+        AND f.fechaemision IS NOT NULL
+    )
+    SELECT 
+        COALESCE(lf.clasificacion_categoria, 'Sin categoría') as categoria,
+        COUNT(DISTINCT lf.numerofactura) as cantidad,
+        CAST(SUM(f.subtotal + f.iva) AS INTEGER) as total,
+        CAST(100.0 * SUM(f.subtotal + f.iva) / NULLIF((SELECT total_general FROM stats_totales), 0) AS DECIMAL(5,2)) as pct
+    FROM lineas_factura lf
+    INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
+    WHERE CAST(STRFTIME('%Y', f.fechaemision) AS INTEGER) = {int(ano)}
+    AND f.fechaemision IS NOT NULL
+    GROUP BY categoria
+    ORDER BY total DESC
+    """
+    return pd.read_sql_query(query, conn)
 
 # ============================================================
-# TABS PRINCIPALES - SOLO 2 VISTAS
+# TABS PRINCIPALES
 # ============================================================
 
-tab1, tab2 = st.tabs([
-    "📊 Comparativa de Años",
-    "🏷️ Desglose por Subcategoría"
+tab1, tab2, tab3, tab4 = st.tabs([
+    "📊 Comparativa Anual",
+    "🏷️ Desglose Subcategorías",
+    "📈 Newton vs Plus",
+    "📍 Análisis Categorías"
 ])
 
 # ============================================================
-# TAB 1: COMPARATIVA DE AÑOS
+# TAB 1: COMPARATIVA ANUAL (12 MESES)
 # ============================================================
 with tab1:
-    st.header("📊 Comparativa de Años por Mes")
+    st.header(f"📊 Comparativa Año {ano_seleccionado} - 12 Meses")
     
-    df_comparativa = get_comparativa_meses_anos(mes_param)
+    df_comp = get_comparativa_12_meses(ano_seleccionado)
     
-    if not df_comparativa.empty:
-        # Crear gráfico
+    if not df_comp.empty:
+        # Rellenar meses faltantes
+        df_comp_full = pd.DataFrame({'mes': range(1, 13)})
+        df_comp_full = df_comp_full.merge(df_comp, on='mes', how='left').fillna(0)
+        df_comp_full['cantidad_facturas'] = df_comp_full['cantidad_facturas'].astype(int)
+        df_comp_full['total_dinero'] = df_comp_full['total_dinero'].astype(int)
+        
+        meses_nombres = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
+        
+        # Gráfico
         fig = go.Figure()
         
-        # Agrupar por año
-        for ano in sorted(df_comparativa['ano'].unique(), reverse=True):
-            df_ano = df_comparativa[df_comparativa['ano'] == ano]
-            
-            # Barra: cantidad de facturas (eje Y principal)
-            fig.add_trace(go.Bar(
-                x=[f"Año {ano}"],
-                y=df_ano['cantidad_facturas'].values,
-                name=f"Facturas {ano}",
-                yaxis='y1',
-                marker=dict(opacity=0.7)
-            ))
-            
-            # Línea: total dinero (eje Y secundario)
-            fig.add_trace(go.Scatter(
-                x=[f"Año {ano}"],
-                y=df_ano['total_dinero'].values,
-                name=f"Total $ {ano}",
-                mode='lines+markers',
-                yaxis='y2',
-                line=dict(width=3),
-                marker=dict(size=10)
-            ))
+        fig.add_trace(go.Bar(
+            x=[meses_nombres[i-1] for i in df_comp_full['mes']],
+            y=df_comp_full['cantidad_facturas'],
+            name='Cantidad de Facturas',
+            yaxis='y1',
+            marker=dict(color='rgba(0, 118, 168, 0.7)')
+        ))
         
-        # Layout con 2 ejes Y
+        fig.add_trace(go.Scatter(
+            x=[meses_nombres[i-1] for i in df_comp_full['mes']],
+            y=df_comp_full['total_dinero'],
+            name='Total en Dinero ($)',
+            yaxis='y2',
+            mode='lines+markers',
+            line=dict(color='#FF6B6B', width=3),
+            marker=dict(size=10)
+        ))
+        
         fig.update_layout(
-            title=f"Comparativa Años - Mes {mes_param:02d}",
-            xaxis_title="Año",
-            yaxis=dict(
-                title="Cantidad de Facturas",
-                side='left'
-            ),
-            yaxis2=dict(
-                title="Total en Dinero ($)",
-                overlaying='y',
-                side='right'
-            ),
+            title=f"Comparativa {ano_seleccionado}: Facturas por Mes y Total en Dinero",
+            xaxis_title="Mes",
+            yaxis=dict(title="Cantidad de Facturas", side='left'),
+            yaxis2=dict(title="Total ($)", overlaying='y', side='right'),
             hovermode='x unified',
             height=500,
             showlegend=True
@@ -203,81 +192,162 @@ with tab1:
         
         st.plotly_chart(fig, use_container_width=True)
         
-        # Tabla con datos
-        st.subheader("Datos Detallados")
+        # Tabla
+        st.subheader("Datos Mensuales")
+        tabla_display = df_comp_full.copy()
+        tabla_display['mes_nombre'] = [meses_nombres[i-1] for i in tabla_display['mes']]
         st.dataframe(
-            df_comparativa,
+            tabla_display[['mes_nombre', 'cantidad_facturas', 'total_dinero']],
             use_container_width=True,
             hide_index=True,
             column_config={
-                "ano": st.column_config.NumberColumn("Año", width=100),
-                "mes": st.column_config.NumberColumn("Mes", width=100),
+                "mes_nombre": st.column_config.TextColumn("Mes", width=100),
                 "cantidad_facturas": st.column_config.NumberColumn("Facturas", width=120),
                 "total_dinero": st.column_config.NumberColumn("Total ($)", width=150, format="$%d"),
             }
         )
     else:
-        st.info("ℹ️ Sin datos disponibles para este mes")
+        st.info("ℹ️ Sin datos para este año")
 
 # ============================================================
-# TAB 2: DESGLOSE POR SUBCATEGORÍA
+# TAB 2: DESGLOSE SUBCATEGORÍAS
 # ============================================================
 with tab2:
-    st.header("🏷️ Desglose por Subcategoría")
+    st.header(f"🏷️ Desglose Subcategorías - {ano_seleccionado}")
     
-    df_subcategorias = get_subcategorias_desglose(ano_seleccionado, mes_param)
+    df_subcat = get_subcategorias_completo(ano_seleccionado)
     
-    if not df_subcategorias.empty:
+    if not df_subcat.empty:
         # Métricas
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.metric("Total Subcategorías", len(df_subcategorias))
+            st.metric("Total Subcategorías", len(df_subcat))
         with col2:
-            st.metric("Total Ingresos", f"${df_subcategorias['total_costo'].sum():,.0f}")
+            st.metric("Ingresos Totales", f"${df_subcat['costo'].sum():,.0f}")
         with col3:
-            st.metric("Promedio Categoría", f"${df_subcategorias['promedio'].mean():,.0f}")
+            st.metric("Promedio", f"${df_subcat['promedio'].mean():,.0f}")
         
         st.divider()
         
-        # Tabla detallada
+        # Tabla
         st.subheader("Detalle Completo")
         st.dataframe(
-            df_subcategorias,
+            df_subcat,
             use_container_width=True,
             hide_index=True,
             column_config={
                 "subcategoria": st.column_config.TextColumn("Subcategoría", width=250),
-                "cantidad_facturas": st.column_config.NumberColumn("Cantidad", width=120),
-                "total_costo": st.column_config.NumberColumn("Costo Total", width=150, format="$%d"),
-                "promedio": st.column_config.NumberColumn("Promedio", width=150, format="$%d"),
-                "porcentaje": st.column_config.NumberColumn("% del Total", width=120, format="%%.2f%%"),
+                "cantidad": st.column_config.NumberColumn("Cantidad", width=100),
+                "costo": st.column_config.NumberColumn("Costo", width=130, format="$%d"),
+                "promedio": st.column_config.NumberColumn("Promedio", width=130, format="$%d"),
+                "pct": st.column_config.NumberColumn("% Total", width=100, format="%.2f%%"),
             }
         )
         
-        # Gráfico: distribución por subcategoría
-        st.subheader("Distribución por Subcategoría")
+        # Gráfico
+        st.subheader("Distribución")
         fig_pie = go.Figure(data=[go.Pie(
-            labels=df_subcategorias['subcategoria'],
-            values=df_subcategorias['total_costo'],
-            text=df_subcategorias['porcentaje'].apply(lambda x: f"{x:.1f}%"),
+            labels=df_subcat['subcategoria'],
+            values=df_subcat['costo'],
             textposition='inside',
-            hovertemplate='<b>%{label}</b><br>Total: $%{value:,.0f}<br>%{text}<extra></extra>'
+            hovertemplate='<b>%{label}</b><br>$%{value:,.0f}<extra></extra>'
         )])
-        fig_pie.update_layout(height=500)
         st.plotly_chart(fig_pie, use_container_width=True)
-        
     else:
-        st.info("📭 Sin datos de subcategorías para este período")
+        st.info("ℹ️ Sin datos de subcategorías")
 
 # ============================================================
-# PIE DE PÁGINA
+# TAB 3: NEWTON VS NEWTON PLUS (DÍA A DÍA)
+# ============================================================
+with tab3:
+    st.header(f"📈 Newton vs Newton Plus - Día a Día {ano_seleccionado}")
+    
+    df_newton = get_newton_diario(ano_seleccionado)
+    
+    if not df_newton.empty:
+        # Tabla
+        st.subheader("Detalle Diario")
+        st.dataframe(
+            df_newton,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "fecha": st.column_config.TextColumn("Fecha", width=120),
+                "tipo": st.column_config.TextColumn("Tipo", width=100),
+                "cantidad": st.column_config.NumberColumn("Cantidad", width=100),
+                "total": st.column_config.NumberColumn("Total ($)", width=130, format="$%d"),
+            }
+        )
+        
+        # Gráfico comparativo
+        st.subheader("Comparativa Gráfica")
+        
+        df_newton_pivot = df_newton.pivot_table(
+            index='fecha', columns='tipo', values='total', aggfunc='sum', fill_value=0
+        )
+        
+        fig = go.Figure()
+        for col in df_newton_pivot.columns:
+            fig.add_trace(go.Scatter(
+                x=df_newton_pivot.index,
+                y=df_newton_pivot[col],
+                name=col,
+                mode='lines+markers'
+            ))
+        
+        fig.update_layout(
+            title="Ingresos Diarios: Newton vs Newton Plus",
+            xaxis_title="Fecha",
+            yaxis_title="Total ($)",
+            hovermode='x unified',
+            height=400
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("ℹ️ Sin datos Newton/Newton Plus")
+
+# ============================================================
+# TAB 4: ANÁLISIS DE CATEGORÍAS
+# ============================================================
+with tab4:
+    st.header(f"📍 Análisis por Categoría - {ano_seleccionado}")
+    
+    df_cat = get_analisis_categorias(ano_seleccionado)
+    
+    if not df_cat.empty:
+        # Tabla
+        st.dataframe(
+            df_cat,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "categoria": st.column_config.TextColumn("Categoría", width=250),
+                "cantidad": st.column_config.NumberColumn("Cantidad", width=100),
+                "total": st.column_config.NumberColumn("Total ($)", width=130, format="$%d"),
+                "pct": st.column_config.NumberColumn("% Total", width=100, format="%.2f%%"),
+            }
+        )
+        
+        # Gráfico
+        fig = go.Figure(data=[go.Bar(
+            x=df_cat['categoria'],
+            y=df_cat['total'],
+            text=df_cat['pct'].apply(lambda x: f"{x:.1f}%"),
+            textposition='outside',
+            marker=dict(color=df_cat['total'], colorscale='Viridis')
+        )])
+        fig.update_layout(
+            title="Total por Categoría",
+            xaxis_title="Categoría",
+            yaxis_title="Total ($)",
+            height=400
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("ℹ️ Sin datos de categorías")
+
+# ============================================================
+# PIE
 # ============================================================
 st.divider()
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    st.caption("✅ BD: SQLite")
-with col2:
-    st.caption(f"📅 {datetime.now().strftime('%d/%m/%Y %H:%M')}")
-with col3:
-    st.caption("🔧 Dashboard v1.0 - LIMPIO")
+st.caption(f"✅ Dashboard v2.0 | {datetime.now().strftime('%d/%m/%Y %H:%M')} | Año: {ano_seleccionado}")
