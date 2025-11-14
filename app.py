@@ -95,30 +95,37 @@ def init_database_if_needed():
             end_date = proximus_mes - timedelta(days=1)
             days_diff = (end_date - start_date).days + 1
             
+            # ✅ CORRECCIÓN: Generar CADA factura dentro del loop
             for i in range(cant_facturas_este_mes):
+                # Fecha uniforme
                 posicion = i / max(cant_facturas_este_mes - 1, 1) if cant_facturas_este_mes > 1 else 0.5
                 dia_offset = int(days_diff * posicion)
                 fecha = start_date + timedelta(days=dia_offset)
                 fecha_str = fecha.strftime('%Y-%m-%d')
                 
+                # Número de factura único
                 numerofactura = f"FAC{factura_num:06d}"
                 factura_num += 1
-            
-            subtotal = round(random.uniform(100, 5000), 2)
-            iva = round(subtotal * 0.19, 2)
-            
-            cursor.execute(
-                'INSERT OR IGNORE INTO facturas VALUES (?, ?, ?, ?)',
-                (numerofactura, fecha_str, subtotal, iva)
-            )
-            
-            categoria = get_categoria()
-            subcategoria = random.choice(categorias.get(categoria, ['Sin subcategoría']))
-            
-            cursor.execute(
-                'INSERT INTO lineas_factura (numerofactura, clasificacion_categoria, clasificacion_subcategoria) VALUES (?, ?, ?)',
-                (numerofactura, categoria, subcategoria)
-            )
+                
+                # ✅ Generar DENTRO del loop para cada factura
+                subtotal = round(random.uniform(100, 5000), 2)
+                iva = round(subtotal * 0.19, 2)
+                
+                # Insertar factura
+                cursor.execute(
+                    'INSERT OR IGNORE INTO facturas VALUES (?, ?, ?, ?)',
+                    (numerofactura, fecha_str, subtotal, iva)
+                )
+                
+                # Generar categoría para esta factura
+                categoria = get_categoria()
+                subcategoria = random.choice(categorias.get(categoria, ['Sin subcategoría']))
+                
+                # Insertar línea de factura
+                cursor.execute(
+                    'INSERT INTO lineas_factura (numerofactura, clasificacion_categoria, clasificacion_subcategoria) VALUES (?, ?, ?)',
+                    (numerofactura, categoria, subcategoria)
+                )
     
     conn.commit()
     conn.close()
