@@ -1,6 +1,4 @@
 
-**Ahora copia este código y reemplaza tu `app.py` actual:**
-
 ```python
 #!/usr/bin/env python3
 
