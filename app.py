@@ -76,8 +76,9 @@ with tab1:
             SELECT 
                 SUBSTR(f.fechaemision, 1, 7) as mes,
                 COUNT(DISTINCT f.numerofactura) as cantidad_facturas,
-                SUM(COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0)) as total_mes
+                SUM(DISTINCT COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0)) as total_mes
             FROM facturas f
+            LEFT JOIN lineas_factura lf ON lf.numerofactura = f.numerofactura AND lf.linea_numero = 1
             WHERE SUBSTR(f.fechaemision, 1, 4) = '{ano_sel1}' 
               AND f.fechaemision IS NOT NULL
             GROUP BY mes
@@ -88,8 +89,9 @@ with tab1:
             SELECT 
                 SUBSTR(f.fechaemision, 1, 7) as mes,
                 COUNT(DISTINCT f.numerofactura) as cantidad_facturas,
-                SUM(COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0)) as total_mes
+                SUM(DISTINCT COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0)) as total_mes
             FROM facturas f
+            LEFT JOIN lineas_factura lf ON lf.numerofactura = f.numerofactura AND lf.linea_numero = 1
             WHERE SUBSTR(f.fechaemision, 1, 4) = '{ano_sel1}' 
               AND SUBSTR(f.fechaemision, 6, 2) = '{mes_sel}'
               AND f.fechaemision IS NOT NULL
@@ -106,8 +108,9 @@ with tab1:
                 SELECT 
                     SUBSTR(f.fechaemision, 1, 7) as mes,
                     COUNT(DISTINCT f.numerofactura) as cantidad_facturas,
-                    SUM(COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0)) as total_mes
+                    SUM(DISTINCT COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0)) as total_mes
                 FROM facturas f
+                LEFT JOIN lineas_factura lf ON lf.numerofactura = f.numerofactura AND lf.linea_numero = 1
                 WHERE SUBSTR(f.fechaemision, 1, 4) = '{ano_sel2}' 
                   AND f.fechaemision IS NOT NULL
                 GROUP BY mes
@@ -118,8 +121,9 @@ with tab1:
                 SELECT 
                     SUBSTR(f.fechaemision, 1, 7) as mes,
                     COUNT(DISTINCT f.numerofactura) as cantidad_facturas,
-                    SUM(COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0)) as total_mes
+                    SUM(DISTINCT COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0)) as total_mes
                 FROM facturas f
+                LEFT JOIN lineas_factura lf ON lf.numerofactura = f.numerofactura AND lf.linea_numero = 1
                 WHERE SUBSTR(f.fechaemision, 1, 4) = '{ano_sel2}' 
                   AND SUBSTR(f.fechaemision, 6, 2) = '{mes_sel}'
                   AND f.fechaemision IS NOT NULL
@@ -228,7 +232,7 @@ with tab2:
                 COALESCE(lf.clasificacion_categoria, 'Sin categoría') as categoria,
                 COALESCE(lf.clasificacion_subcategoria, 'Sin subcategoría') as subcategoria,
                 COUNT(DISTINCT lf.numerofactura) as cantidad_facturas,
-                SUM(COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0)) as total_subcategoria
+                SUM(DISTINCT CASE WHEN lf.linea_numero = 1 THEN COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0) ELSE 0 END) as total_subcategoria
             FROM lineas_factura lf
             INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
             WHERE SUBSTR(f.fechaemision, 1, 4) = '{ano_sel}' 
@@ -242,7 +246,7 @@ with tab2:
                 COALESCE(lf.clasificacion_categoria, 'Sin categoría') as categoria,
                 COALESCE(lf.clasificacion_subcategoria, 'Sin subcategoría') as subcategoria,
                 COUNT(DISTINCT lf.numerofactura) as cantidad_facturas,
-                SUM(COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0)) as total_subcategoria
+                SUM(DISTINCT CASE WHEN lf.linea_numero = 1 THEN COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0) ELSE 0 END) as total_subcategoria
             FROM lineas_factura lf
             INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
             WHERE SUBSTR(f.fechaemision, 1, 4) = '{ano_sel}' 
@@ -325,7 +329,7 @@ with tab3:
                 ELSE 'Otro'
             END as categoria_producto,
             COUNT(DISTINCT lf.numerofactura) as cantidad_facturas,
-            SUM(COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0)) as total_diario
+            SUM(DISTINCT CASE WHEN lf.linea_numero = 1 THEN COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0) ELSE 0 END) as total_diario
         FROM lineas_factura lf
         INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
         WHERE SUBSTR(f.fechaemision, 1, 4) = '{ano_sel}' 
@@ -468,7 +472,7 @@ with tab4:
                 ELSE 'Mayor a 1M'
             END as rango,
             COUNT(DISTINCT f.numerofactura) as cantidad,
-            SUM(COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0)) as total
+            SUM(DISTINCT COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0)) as total
         FROM facturas f
         WHERE SUBSTR(f.fechaemision, 1, 4) = '{ano_sel}' 
           AND f.fechaemision IS NOT NULL
@@ -494,7 +498,7 @@ with tab4:
         SELECT 
             f.fechaemision as fecha,
             COUNT(DISTINCT f.numerofactura) as cantidad,
-            SUM(COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0)) as total
+            SUM(DISTINCT COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0)) as total
         FROM facturas f
         WHERE SUBSTR(f.fechaemision, 1, 4) = '{ano_sel}' 
           AND f.fechaemision IS NOT NULL
@@ -539,7 +543,7 @@ with tab4:
         SELECT 
             COALESCE(lf.clasificacion_subcategoria, 'Sin subcategoría') as subcategoria,
             COUNT(DISTINCT lf.numerofactura) as cantidad,
-            SUM(COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0)) as total
+            SUM(DISTINCT CASE WHEN lf.linea_numero = 1 THEN COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0) ELSE 0 END) as total
         FROM lineas_factura lf
         INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
         WHERE SUBSTR(f.fechaemision, 1, 4) = '{ano_sel}' 
