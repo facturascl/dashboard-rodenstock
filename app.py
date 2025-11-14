@@ -66,12 +66,12 @@ mes_param = st.sidebar.selectbox(
 )
 
 # ============================================================
-# FUNCIONES DE CONSULTA - CORREGIDAS SIN DOBLE CONTEO
+# FUNCIONES DE CONSULTA - CORREGIDAS
 # ============================================================
 
 @st.cache_data(ttl=600)
 def get_totales_periodo(ano_sel, mes_param):
-    """Totales mensuales - SIN DOBLE CONTEO"""
+    """Totales mensuales"""
     query = f"""
     SELECT 
         CAST(STRFTIME('%Y', fechaemision) AS INTEGER) as ano,
@@ -88,12 +88,11 @@ def get_totales_periodo(ano_sel, mes_param):
 
 @st.cache_data(ttl=600)
 def get_resumen_facturas(ano_sel, mes_param):
-    """Resumen detallado de facturas - SIN DOBLE CONTEO"""
+    """Resumen detallado de facturas - SIN columna descripcion (no existe)"""
     query = f"""
     SELECT
         f.numerofactura,
         DATE(f.fechaemision) as fecha,
-        f.descripcion,
         (SELECT COUNT(DISTINCT linea_numero) 
          FROM lineas_factura 
          WHERE numerofactura = f.numerofactura) as items,
@@ -110,7 +109,7 @@ def get_resumen_facturas(ano_sel, mes_param):
 
 @st.cache_data(ttl=600)
 def get_categorias_detalle(ano_sel, mes_param):
-    """Categorías y subcategorías - SIN DOBLE CONTEO"""
+    """Categorías y subcategorías"""
     query = f"""
     SELECT 
         COALESCE(lf.clasificacion_categoria, 'Sin categoría') as categoria,
@@ -129,7 +128,7 @@ def get_categorias_detalle(ano_sel, mes_param):
 
 @st.cache_data(ttl=600)
 def get_newton_diario(ano_sel, mes_param):
-    """Newton vs Newton Plus por día - SIN DOBLE CONTEO"""
+    """Newton vs Newton Plus por día"""
     query = f"""
     WITH trabajos AS (
         SELECT
@@ -171,7 +170,7 @@ def get_newton_diario(ano_sel, mes_param):
 
 @st.cache_data(ttl=600)
 def get_top_subcategorias(ano_sel, mes_param):
-    """Top 10 subcategorías - SIN DOBLE CONTEO"""
+    """Top 10 subcategorías"""
     query = f"""
     SELECT 
         COALESCE(lf.clasificacion_subcategoria, 'Sin subcategoría') as subcategoria,
@@ -185,6 +184,23 @@ def get_top_subcategorias(ano_sel, mes_param):
     GROUP BY subcategoria
     ORDER BY total DESC
     LIMIT 10
+    """
+    return pd.read_sql_query(query, conn)
+
+@st.cache_data(ttl=600)
+def get_comparativa_anos(mes_param):
+    """Comparativa de 2 años por mes - AGREGADO PERDIDO"""
+    query = f"""
+    SELECT 
+        CAST(STRFTIME('%Y', fechaemision) AS INTEGER) as ano,
+        CAST(STRFTIME('%m', fechaemision) AS INTEGER) as mes,
+        COUNT(DISTINCT numerofactura) as cantidad_facturas,
+        CAST(SUM(subtotal + iva) AS INTEGER) as total_mes
+    FROM facturas
+    WHERE CAST(STRFTIME('%m', fechaemision) AS INTEGER) = {mes_param}
+    AND fechaemision IS NOT NULL
+    GROUP BY ano, mes
+    ORDER BY ano DESC
     """
     return pd.read_sql_query(query, conn)
 
@@ -224,7 +240,7 @@ with tab1:
         with col4:
             st.metric("📅 Período", f"{ano_seleccionado}-{mes_param:02d}")
         
-        # Gráfico de línea de totales
+        # Gráfico de línea de totales diarios
         st.subheader("Distribución diaria de ingresos")
         
         query_diario = f"""
@@ -259,6 +275,36 @@ with tab1:
                 height=400
             )
             st.plotly_chart(fig, use_container_width=True)
+        
+        # GRÁFICO DE COMPARATIVA POR AÑO - RESTAURADO
+        st.divider()
+        st.subheader("📊 Comparativa de años - Mes seleccionado")
+        
+        df_comparativa = get_comparativa_anos(mes_param)
+        
+        if not df_comparativa.empty and len(df_comparativa) > 1:
+            fig_comparativa = go.Figure()
+            
+            for idx, row in df_comparativa.iterrows():
+                fig_comparativa.add_trace(go.Bar(
+                    x=['Facturas', 'Total ($)'],
+                    y=[row['cantidad_facturas'], row['total_mes'] / 1000],  # Dividir por 1000 para escala
+                    name=f"Año {int(row['ano'])}",
+                    text=[f"{int(row['cantidad_facturas'])}", f"${row['total_mes']:,.0f}"],
+                    textposition='auto'
+                ))
+            
+            fig_comparativa.update_layout(
+                title=f"Comparativa Años - Mes {mes_param:02d}",
+                xaxis_title="Métrica",
+                yaxis_title="Valor (Facturas o $k)",
+                barmode='group',
+                height=400,
+                hovermode='x unified'
+            )
+            st.plotly_chart(fig_comparativa, use_container_width=True)
+        elif not df_comparativa.empty:
+            st.info("ℹ️ Solo hay datos de un año. Necesitas 2 años para comparar.")
     else:
         st.warning("⚠️ No hay datos disponibles para este período")
 
@@ -274,13 +320,12 @@ with tab2:
         # Buscador y filtro
         col1, col2 = st.columns(2)
         with col1:
-            buscar = st.text_input("🔍 Buscar por número de factura o descripción:")
+            buscar = st.text_input("🔍 Buscar por número de factura:")
         
         # Aplicar filtro
         if buscar:
             df_facturas = df_facturas[
-                (df_facturas['numerofactura'].astype(str).str.contains(buscar, case=False)) |
-                (df_facturas['descripcion'].astype(str).str.contains(buscar, case=False))
+                df_facturas['numerofactura'].astype(str).str.contains(buscar, case=False)
             ]
         
         # Tabla
@@ -291,7 +336,6 @@ with tab2:
             column_config={
                 "numerofactura": st.column_config.TextColumn("N° Factura", width=120),
                 "fecha": st.column_config.DateColumn("Fecha", width=100),
-                "descripcion": st.column_config.TextColumn("Descripción", width=250),
                 "items": st.column_config.NumberColumn("Items", width=80),
                 "subtotal": st.column_config.NumberColumn("Subtotal", width=100, format="$%d"),
                 "iva": st.column_config.NumberColumn("IVA", width=100, format="$%d"),
@@ -483,4 +527,4 @@ with col1:
 with col2:
     st.caption(f"📅 Última actualización: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
 with col3:
-    st.caption("🔧 Rodenstock Dashboard v3.0")
+    st.caption("🔧 Rodenstock Dashboard v3.1")
