@@ -6,7 +6,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 import sqlite3
 import os
-from datetime import datetime, timedelta
+from datetime import datetime
 
 st.set_page_config(
     page_title="Dashboard Rodenstock Pro",
@@ -210,7 +210,7 @@ with tab1:
         st.error(f"Error en Tab 1: {str(e)}")
 
 with tab2:
-    st.subheader("🏷️ Análisis por Categoría y Subcategoría (SIN MEZCLA)")
+    st.subheader("🏷️ Análisis por Categoría y Subcategoría")
     
     col1, col2 = st.columns(2)
     with col1:
@@ -226,8 +226,11 @@ with tab2:
             SELECT 
                 COALESCE(lf.clasificacion_categoria, 'Sin categoría') as categoria,
                 COALESCE(lf.clasificacion_subcategoria, 'Sin subcategoría') as subcategoria,
-                COUNT(DISTINCT f.numerofactura) as cantidad_facturas,
-                SUM(COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0)) as total_subcategoria
+                COUNT(DISTINCT lf.numerofactura) as cantidad_facturas,
+                SUM(DISTINCT CASE 
+                    WHEN lf.linea_numero = 1 THEN COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0)
+                    ELSE 0
+                END) as total_subcategoria
             FROM lineas_factura lf
             INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
             WHERE SUBSTR(f.fechaemision, 1, 4) = '{ano_sel}' 
@@ -240,8 +243,11 @@ with tab2:
             SELECT 
                 COALESCE(lf.clasificacion_categoria, 'Sin categoría') as categoria,
                 COALESCE(lf.clasificacion_subcategoria, 'Sin subcategoría') as subcategoria,
-                COUNT(DISTINCT f.numerofactura) as cantidad_facturas,
-                SUM(COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0)) as total_subcategoria
+                COUNT(DISTINCT lf.numerofactura) as cantidad_facturas,
+                SUM(DISTINCT CASE 
+                    WHEN lf.linea_numero = 1 THEN COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0)
+                    ELSE 0
+                END) as total_subcategoria
             FROM lineas_factura lf
             INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
             WHERE SUBSTR(f.fechaemision, 1, 4) = '{ano_sel}' 
@@ -322,16 +328,19 @@ with tab3:
                 WHEN lf.clasificacion_categoria LIKE '%Newton%' THEN 'Newton'
                 ELSE 'Otro'
             END as categoria_producto,
-            COUNT(DISTINCT f.numerofactura) as cantidad_trabajos,
-            SUM(COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0)) as total_diario
+            COUNT(DISTINCT lf.numerofactura) as cantidad_facturas,
+            SUM(DISTINCT CASE 
+                WHEN lf.linea_numero = 1 THEN COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0)
+                ELSE 0
+            END) as total_diario
         FROM lineas_factura lf
         INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
         WHERE SUBSTR(f.fechaemision, 1, 4) = '{ano_sel}' 
           AND f.fechaemision >= '{fecha_inicio_str}'
           AND f.fechaemision <= '{fecha_fin_str}'
           AND f.fechaemision IS NOT NULL
-        GROUP BY fecha, categoria_producto
-        ORDER BY fecha DESC
+        GROUP BY f.fechaemision, categoria_producto
+        ORDER BY f.fechaemision DESC
         """
         
         df_newton = pd.read_sql_query(query, conn)
@@ -341,31 +350,31 @@ with tab3:
             df_newton_filtered = df_newton[df_newton['categoria_producto'].isin(['Newton', 'Newton Plus'])]
             
             if not df_newton_filtered.empty:
-                df_newton_filtered['promedio_diario'] = df_newton_filtered['total_diario'] / df_newton_filtered['cantidad_trabajos']
+                df_newton_filtered['promedio_diario'] = df_newton_filtered['total_diario'] / df_newton_filtered['cantidad_facturas']
                 
                 df_pivot = df_newton_filtered.pivot_table(
                     index='fecha',
                     columns='categoria_producto',
-                    values=['cantidad_trabajos', 'promedio_diario'],
+                    values=['cantidad_facturas', 'promedio_diario'],
                     fill_value=0
                 )
                 
                 fig = go.Figure()
                 
-                if ('cantidad_trabajos', 'Newton') in df_pivot.columns:
+                if ('cantidad_facturas', 'Newton') in df_pivot.columns:
                     fig.add_trace(go.Scatter(
                         x=df_pivot.index,
-                        y=df_pivot[('cantidad_trabajos', 'Newton')],
+                        y=df_pivot[('cantidad_facturas', 'Newton')],
                         mode='lines+markers',
                         name='Newton (Cantidad)',
                         line=dict(color='#667eea', width=2),
                         yaxis='y1'
                     ))
                 
-                if ('cantidad_trabajos', 'Newton Plus') in df_pivot.columns:
+                if ('cantidad_facturas', 'Newton Plus') in df_pivot.columns:
                     fig.add_trace(go.Scatter(
                         x=df_pivot.index,
-                        y=df_pivot[('cantidad_trabajos', 'Newton Plus')],
+                        y=df_pivot[('cantidad_facturas', 'Newton Plus')],
                         mode='lines+markers',
                         name='Newton Plus (Cantidad)',
                         line=dict(color='#51cf66', width=2),
@@ -404,11 +413,11 @@ with tab3:
                 st.plotly_chart(fig, use_container_width=True)
                 
                 summary = df_newton_filtered.groupby('categoria_producto').agg({
-                    'cantidad_trabajos': 'sum',
+                    'cantidad_facturas': 'sum',
                     'total_diario': 'sum'
                 }).reset_index()
                 
-                summary['promedio_general'] = summary['total_diario'] / summary['cantidad_trabajos']
+                summary['promedio_general'] = summary['total_diario'] / summary['cantidad_facturas']
                 summary.columns = ['Categoría', 'Total Trabajos', 'Total ($)', 'Promedio General ($)']
                 summary['Total ($)'] = summary['Total ($)'].apply(lambda x: f"${x:,.2f}")
                 summary['Promedio General ($)'] = summary['Promedio General ($)'].apply(lambda x: f"${x:,.2f}")
@@ -420,7 +429,7 @@ with tab3:
                     newton_data = df_newton_filtered[df_newton_filtered['categoria_producto'] == 'Newton']
                     if not newton_data.empty:
                         total_newton = newton_data['total_diario'].sum()
-                        cant_newton = newton_data['cantidad_trabajos'].sum()
+                        cant_newton = newton_data['cantidad_facturas'].sum()
                         promedio_newton = total_newton / cant_newton
                         st.metric(
                             "Newton - Trabajos",
@@ -432,7 +441,7 @@ with tab3:
                     newton_plus_data = df_newton_filtered[df_newton_filtered['categoria_producto'] == 'Newton Plus']
                     if not newton_plus_data.empty:
                         total_plus = newton_plus_data['total_diario'].sum()
-                        cant_plus = newton_plus_data['cantidad_trabajos'].sum()
+                        cant_plus = newton_plus_data['cantidad_facturas'].sum()
                         promedio_plus = total_plus / cant_plus
                         st.metric(
                             "Newton Plus - Trabajos",
@@ -535,8 +544,11 @@ with tab4:
         query_top_sub = f"""
         SELECT 
             COALESCE(lf.clasificacion_subcategoria, 'Sin subcategoría') as subcategoria,
-            COUNT(DISTINCT f.numerofactura) as cantidad,
-            SUM(COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0)) as total
+            COUNT(DISTINCT lf.numerofactura) as cantidad,
+            SUM(DISTINCT CASE 
+                WHEN lf.linea_numero = 1 THEN COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0)
+                ELSE 0
+            END) as total
         FROM lineas_factura lf
         INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
         WHERE SUBSTR(f.fechaemision, 1, 4) = '{ano_sel}' 
