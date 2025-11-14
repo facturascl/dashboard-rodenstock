@@ -49,40 +49,60 @@ def init_database_if_needed():
         'Newton Plus': ['Newton Plus Premium'],
     }
     
-    start_date = datetime(2025, 1, 1)
-    num_facturas = 433
-    factura_num = 1000
+    yearly_facturas = {
+        2020: 4500,
+        2021: 6000,
+        2022: 6500,
+        2023: 6500,
+        2024: 6500,
+        2025: 4500
+    }
     
-    for i in range(num_facturas):
-        days_offset = random.randint(0, 30)
-        fecha = start_date + timedelta(days=days_offset)
-        fecha_str = fecha.strftime('%Y-%m-%d')
-        
-        numerofactura = f"FAC{factura_num:06d}"
-        factura_num += 1
-        
-        subtotal = round(random.uniform(100, 5000), 2)
-        iva = round(subtotal * 0.19, 2)
-        
-        cursor.execute(
-            'INSERT OR IGNORE INTO facturas VALUES (?, ?, ?, ?)',
-            (numerofactura, fecha_str, subtotal, iva)
-        )
-        
+    def get_categoria():
         cat_choice = random.randint(1, 100)
         if cat_choice <= 57:
-            categoria = 'Monofocales'
+            return 'Monofocales'
+        elif cat_choice <= 97:
+            return 'Progresivo'
         elif cat_choice <= 99:
-            categoria = 'Progresivo'
-        elif cat_choice <= 100:
-            categoria = random.choice(['Newton', 'Newton Plus'])
+            return 'Newton'
+        else:
+            return 'Newton Plus'
+    
+    factura_num = 1000
+    for year in range(2020, 2026):
+        start_date = datetime(year, 1, 1)
+        if year == 2025:
+            end_date = datetime(2025, 11, 30)
+        else:
+            end_date = datetime(year, 12, 31)
         
-        subcategoria = random.choice(categorias.get(categoria, ['Sin subcategoría']))
+        num_facturas = yearly_facturas[year]
+        days_diff = (end_date - start_date).days
         
-        cursor.execute(
-            'INSERT INTO lineas_factura (numerofactura, clasificacion_categoria, clasificacion_subcategoria) VALUES (?, ?, ?)',
-            (numerofactura, categoria, subcategoria)
-        )
+        for i in range(num_facturas):
+            random_days = random.randint(0, days_diff)
+            fecha = start_date + timedelta(days=random_days)
+            fecha_str = fecha.strftime('%Y-%m-%d')
+            
+            numerofactura = f"FAC{factura_num:06d}"
+            factura_num += 1
+            
+            subtotal = round(random.uniform(100, 5000), 2)
+            iva = round(subtotal * 0.19, 2)
+            
+            cursor.execute(
+                'INSERT OR IGNORE INTO facturas VALUES (?, ?, ?, ?)',
+                (numerofactura, fecha_str, subtotal, iva)
+            )
+            
+            categoria = get_categoria()
+            subcategoria = random.choice(categorias.get(categoria, ['Sin subcategoría']))
+            
+            cursor.execute(
+                'INSERT INTO lineas_factura (numerofactura, clasificacion_categoria, clasificacion_subcategoria) VALUES (?, ?, ?)',
+                (numerofactura, categoria, subcategoria)
+            )
     
     conn.commit()
     conn.close()
