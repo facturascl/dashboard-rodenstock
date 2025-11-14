@@ -1,9 +1,3 @@
-#!/usr/bin/env python3
-"""
-Dashboard de Facturación Rodenstock - PROFESIONAL CORREGIDO
-Totales consistentes: 1 factura = 1 trabajo
-"""
-
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
@@ -484,5 +478,5 @@ with tab4:
 # ========== FOOTER ==========
 st.markdown("---")
 st.caption(f"Última actualización: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-```
+
 
