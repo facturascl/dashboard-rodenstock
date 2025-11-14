@@ -66,15 +66,20 @@ def get_comparativa_12_meses(ano):
     return pd.read_sql_query(query, conn)
 
 @st.cache_data(ttl=300)
-def get_subcategorias_completo(ano):
-    """Todas las subcategorías: cantidad, costo, promedio, porcentaje"""
+def get_subcategorias_completo(ano, mes=None):
+    """Newton + Progresivo por subcategoría"""
+    where_clause = f"CAST(STRFTIME('%Y', f.fechaemision) AS INTEGER) = {int(ano)} AND f.fechaemision IS NOT NULL"
+    
+    if mes:
+        where_clause += f" AND CAST(STRFTIME('%m', f.fechaemision) AS INTEGER) = {int(mes)}"
+    
     query = f"""
     WITH stats_totales AS (
         SELECT CAST(SUM(f.subtotal + f.iva) AS INTEGER) as total_general
         FROM lineas_factura lf
         INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
-        WHERE CAST(STRFTIME('%Y', f.fechaemision) AS INTEGER) = {int(ano)}
-        AND f.fechaemision IS NOT NULL
+        WHERE {where_clause}
+        AND lf.clasificacion_categoria IN ('Newton', 'Progresivo')
     )
     SELECT 
         COALESCE(lf.clasificacion_subcategoria, 'Sin clasificación') as subcategoria,
@@ -84,8 +89,8 @@ def get_subcategorias_completo(ano):
         CAST(100.0 * SUM(f.subtotal + f.iva) / NULLIF((SELECT total_general FROM stats_totales), 0) AS DECIMAL(5,2)) as pct
     FROM lineas_factura lf
     INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
-    WHERE CAST(STRFTIME('%Y', f.fechaemision) AS INTEGER) = {int(ano)}
-    AND f.fechaemision IS NOT NULL
+    WHERE {where_clause}
+    AND lf.clasificacion_categoria IN ('Newton', 'Progresivo')
     GROUP BY subcategoria
     ORDER BY costo DESC
     """
@@ -111,14 +116,20 @@ def get_newton_rango(fecha_inicio, fecha_fin):
     return pd.read_sql_query(query, conn)
 
 @st.cache_data(ttl=300)
-def get_analisis_subcategorias(ano):
-    """Análisis COMPLETO por subcategoría"""
+def get_analisis_subcategorias(ano, mes=None):
+    """Análisis COMPLETO Newton + Progresivo por subcategoría"""
+    where_clause = f"CAST(STRFTIME('%Y', f.fechaemision) AS INTEGER) = {int(ano)} AND f.fechaemision IS NOT NULL"
+    
+    if mes:
+        where_clause += f" AND CAST(STRFTIME('%m', f.fechaemision) AS INTEGER) = {int(mes)}"
+    
     query = f"""
     WITH stats_totales AS (
         SELECT CAST(SUM(f.subtotal + f.iva) AS INTEGER) as total_general
-        FROM facturas f
-        WHERE CAST(STRFTIME('%Y', f.fechaemision) AS INTEGER) = {int(ano)}
-        AND f.fechaemision IS NOT NULL
+        FROM lineas_factura lf
+        INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
+        WHERE {where_clause}
+        AND lf.clasificacion_categoria IN ('Newton', 'Progresivo')
     )
     SELECT 
         COALESCE(lf.clasificacion_subcategoria, 'Sin clasificación') as subcategoria,
@@ -128,8 +139,8 @@ def get_analisis_subcategorias(ano):
         CAST(100.0 * SUM(f.subtotal + f.iva) / NULLIF((SELECT total_general FROM stats_totales), 0) AS DECIMAL(5,2)) as pct
     FROM lineas_factura lf
     INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
-    WHERE CAST(STRFTIME('%Y', f.fechaemision) AS INTEGER) = {int(ano)}
-    AND f.fechaemision IS NOT NULL
+    WHERE {where_clause}
+    AND lf.clasificacion_categoria IN ('Newton', 'Progresivo')
     GROUP BY subcategoria
     ORDER BY total DESC
     """
@@ -273,9 +284,9 @@ with tab1:
 # TAB 2: DESGLOSE SUBCATEGORÍAS
 # ============================================================
 with tab2:
-    st.header(f"🏷️ Desglose Subcategorías - Año {ano1}")
+    st.header(f"🏷️ Desglose Subcategorías - Año {ano1}, Mes {meses_nombres[mes_seleccionado-1]}")
     
-    df_subcat = get_subcategorias_completo(ano1)
+    df_subcat = get_subcategorias_completo(ano1, mes_seleccionado)
     
     if not df_subcat.empty:
         # Métricas
@@ -392,9 +403,9 @@ with tab3:
 # TAB 4: ANÁLISIS POR SUBCATEGORÍA
 # ============================================================
 with tab4:
-    st.header(f"📍 Análisis Completo por Subcategoría - Año {ano1}")
+    st.header(f"📍 Análisis Newton + Progresivo - Año {ano1}, Mes {meses_nombres[mes_seleccionado-1]}")
     
-    df_subcat_full = get_analisis_subcategorias(ano1)
+    df_subcat_full = get_analisis_subcategorias(ano1, mes_seleccionado)
     
     if not df_subcat_full.empty:
         # Métricas
