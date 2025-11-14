@@ -5,22 +5,19 @@ import plotly.express as px
 import plotly.graph_objects as go
 import sqlite3
 import os
-from datetime import datetime
 
 # ============================================================================
-# CONFIGURACIÓN BD - VERSIÓN SIMPLE
+# CONFIGURACIÓN BD
 # ============================================================================
 
-# Usar ruta directa o variable de entorno
 DB_FILE = os.getenv('FACTURAS_DB', './facturas.db')
 
-# Validar que existe
 try:
     conn = sqlite3.connect(DB_FILE)
     conn.execute("SELECT 1")
     conn.close()
 except Exception as e:
-    st.error(f"❌ No se puede conectar a {DB_FILE}: {str(e)}")
+    st.error(f"❌ Error BD: {str(e)}")
     st.stop()
 
 # ============================================================================
@@ -35,7 +32,7 @@ st.set_page_config(
 )
 
 # ============================================================================
-# FUNCIONES DB
+# FUNCIONES DB - SIN CAST
 # ============================================================================
 
 def get_conn():
@@ -43,22 +40,25 @@ def get_conn():
 
 @st.cache_data(ttl=600)
 def get_anos_disponibles():
-    """Años disponibles en BD"""
+    """Años disponibles en BD - SIN CAST"""
     conn = get_conn()
     try:
         query = """
-        SELECT DISTINCT CAST(STRFTIME('%Y', fechaemision) AS INTEGER) AS ano 
+        SELECT DISTINCT SUBSTR(fechaemision, 1, 4) AS ano 
         FROM facturas 
-        WHERE fechaemision IS NOT NULL 
+        WHERE fechaemision IS NOT NULL AND fechaemision != ''
         ORDER BY ano DESC
         """
         df = pd.read_sql_query(query, conn)
         conn.close()
-        anos = sorted(set([int(x) for x in df['ano'].dropna()]))
-        return sorted(anos, reverse=True) if anos else [2024, 2025]
-    except:
+        if not df.empty and not df['ano'].isna().all():
+            anos = sorted([str(x).strip() for x in df['ano'].dropna() if x])
+            return sorted(anos, reverse=True)
+    except Exception as e:
         conn.close()
-        return [2024, 2025]
+
+    # Fallback completo
+    return ['2025', '2024', '2023', '2022']
 
 @st.cache_data(ttl=600)
 def get_meses_por_ano(ano):
@@ -66,18 +66,20 @@ def get_meses_por_ano(ano):
     conn = get_conn()
     try:
         query = f"""
-        SELECT DISTINCT STRFTIME('%m', fechaemision) AS mes
+        SELECT DISTINCT SUBSTR(fechaemision, 6, 2) AS mes
         FROM facturas
-        WHERE CAST(STRFTIME('%Y', fechaemision) AS INTEGER) = {ano}
+        WHERE fechaemision LIKE '{ano}-%'
         AND fechaemision IS NOT NULL
         ORDER BY mes
         """
         df = pd.read_sql_query(query, conn)
         conn.close()
-        return sorted(df['mes'].dropna().tolist()) if not df.empty else []
+        if not df.empty and not df['mes'].isna().all():
+            return sorted([str(x).strip() for x in df['mes'].dropna() if x])
     except:
         conn.close()
-        return []
+
+    return []
 
 def format_currency(value):
     if value is None or pd.isna(value):
@@ -100,7 +102,7 @@ def get_totales_periodo(ano, mes=None):
     """Totales generales"""
     conn = get_conn()
     try:
-        filtro = f"AND STRFTIME('%m', fechaemision) = '{mes}'" if mes else ""
+        filtro = f"AND SUBSTR(fechaemision, 6, 2) = '{mes}'" if mes else ""
         query = f"""
         SELECT
           COUNT(DISTINCT numerofactura) AS total_facturas,
@@ -109,13 +111,14 @@ def get_totales_periodo(ano, mes=None):
           ROUND(COALESCE(SUM(subtotal + iva), 0), 2) AS total_ingresos,
           ROUND(COALESCE(AVG(subtotal + iva), 0), 2) AS promedio_factura
         FROM facturas
-        WHERE fechaemision IS NOT NULL
+        WHERE fechaemision LIKE '{ano}-%'
+          AND fechaemision IS NOT NULL
           {filtro}
         """
         df = pd.read_sql_query(query, conn)
         conn.close()
         return df if not df.empty else pd.DataFrame({'total_facturas': [0], 'total_subtotal': [0.0], 'total_iva': [0.0], 'total_ingresos': [0.0], 'promedio_factura': [0.0]})
-    except Exception as e:
+    except:
         conn.close()
         return pd.DataFrame({'total_facturas': [0], 'total_subtotal': [0.0], 'total_iva': [0.0], 'total_ingresos': [0.0], 'promedio_factura': [0.0]})
 
@@ -126,11 +129,11 @@ def get_evolucion_mensual(ano):
     try:
         query = f"""
         SELECT
-          STRFTIME('%m', f.fechaemision) AS mes,
+          SUBSTR(f.fechaemision, 6, 2) AS mes,
           COUNT(DISTINCT f.numerofactura) AS cantidad_facturas,
           ROUND(COALESCE(SUM(f.subtotal + f.iva), 0), 2) AS total_mes
         FROM facturas f
-        WHERE CAST(STRFTIME('%Y', f.fechaemision) AS INTEGER) = {ano}
+        WHERE f.fechaemision LIKE '{ano}-%'
         AND f.fechaemision IS NOT NULL
         GROUP BY mes
         ORDER BY mes
@@ -149,7 +152,7 @@ def get_categorias_por_periodo(ano, mes=None):
     """Categorías"""
     conn = get_conn()
     try:
-        filtro_mes = f"AND STRFTIME('%m', f.fechaemision) = '{mes}'" if mes else ""
+        filtro_mes = f"AND SUBSTR(f.fechaemision, 6, 2) = '{mes}'" if mes else ""
 
         query = f"""
         WITH facturas_clasificadas AS (
@@ -166,7 +169,8 @@ def get_categorias_por_periodo(ano, mes=None):
             COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0) AS total_factura
           FROM lineas_factura lf
           INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
-          WHERE f.fechaemision IS NOT NULL
+          WHERE f.fechaemision LIKE '{ano}-%'
+            AND f.fechaemision IS NOT NULL
             {filtro_mes}
           GROUP BY f.numerofactura, f.fechaemision, categoria, total_factura
         ),
@@ -181,8 +185,7 @@ def get_categorias_por_periodo(ano, mes=None):
         ),
         totales_periodo AS (
           SELECT
-            SUM(total_dinero) AS total_mes,
-            SUM(cantidad_trabajos) AS total_trabajos
+            SUM(total_dinero) AS total_mes
           FROM resumen_categorias
         )
         SELECT
@@ -207,7 +210,7 @@ def get_subcategorias_por_periodo(ano, mes=None, categoria=None):
     """Subcategorías"""
     conn = get_conn()
     try:
-        filtro_mes = f"AND STRFTIME('%m', f.fechaemision) = '{mes}'" if mes else ""
+        filtro_mes = f"AND SUBSTR(f.fechaemision, 6, 2) = '{mes}'" if mes else ""
         filtro_cat = f"AND lf.clasificacion_categoria = '{categoria.replace(chr(39), chr(39)*2)}'" if categoria else ""
 
         query = f"""
@@ -220,7 +223,8 @@ def get_subcategorias_por_periodo(ano, mes=None, categoria=None):
             COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0) AS total_factura
           FROM lineas_factura lf
           INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
-          WHERE f.fechaemision IS NOT NULL
+          WHERE f.fechaemision LIKE '{ano}-%'
+            AND f.fechaemision IS NOT NULL
             AND lf.clasificacion_categoria IS NOT NULL
             {filtro_mes}
             {filtro_cat}
@@ -255,9 +259,13 @@ with st.sidebar:
     st.header("🔧 Filtros")
 
     anos_disponibles = get_anos_disponibles()
+    st.write(f"**Años encontrados:** {anos_disponibles}")
+
     ano_seleccionado = st.selectbox("📅 Año", options=anos_disponibles, index=0)
 
     meses_disponibles = get_meses_por_ano(ano_seleccionado)
+    st.write(f"**Meses en {ano_seleccionado}:** {meses_disponibles}")
+
     mes_options = ["Todos"] + meses_disponibles
     mes_seleccionado = st.selectbox("📆 Mes", options=mes_options, index=0)
 
