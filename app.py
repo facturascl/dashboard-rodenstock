@@ -155,7 +155,7 @@ with tab2:
         
         where_mes = f"AND SUBSTR(f.fechaemision, 1, 7) = '{mes_sel}'" if mes_sel != "Todos" else ""
         
-        # CORRECCIÓN: Solo traer FACTURAS ÚNICAS con sus categorías (SIN contar líneas múltiples)
+        # CORRECCIÓN: Agrupar SOLO por PRIMERA línea de cada factura
         query = f"""
         SELECT 
             COALESCE(lf.clasificacion_categoria, 'Sin categoría') as categoria,
@@ -167,6 +167,7 @@ with tab2:
         WHERE SUBSTR(f.fechaemision, 1, 4) = '{ano_sel}' 
           AND f.fechaemision IS NOT NULL
           {where_mes}
+          AND lf.numlinea = 1
         GROUP BY categoria, subcategoria
         ORDER BY total_subcategoria DESC
         """
@@ -217,12 +218,12 @@ with tab2:
 
 # ==================== TAB 3: NEWTON vs NEWTON PLUS ====================
 with tab3:
-    st.subheader("🔄 Resumen Diario: Newton vs Newton Plus")
+    st.subheader("🔄 Newton vs Newton Plus: Análisis Diario con Promedio")
     
     try:
         conn = get_db_connection()
         
-        # CORRECCIÓN: Usar FACTURAS ÚNICAS (no líneas)
+        # CORRECCIÓN: Solo línea 1 por factura + calcular promedio POR FACTURA
         query = f"""
         SELECT 
             f.fechaemision as fecha,
@@ -232,11 +233,12 @@ with tab3:
                 ELSE 'Otro'
             END as categoria_producto,
             COUNT(DISTINCT f.numerofactura) as cantidad_trabajos,
-            SUM(COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0)) as total
+            SUM(COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0)) as total_diario
         FROM lineas_factura lf
         INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
         WHERE SUBSTR(f.fechaemision, 1, 4) = '{ano_sel}' 
           AND f.fechaemision IS NOT NULL
+          AND lf.numlinea = 1
         GROUP BY fecha, categoria_producto
         ORDER BY fecha DESC
         """
@@ -249,7 +251,7 @@ with tab3:
             
             if not df_newton_filtered.empty:
                 # Calcular promedio por día
-                df_newton_filtered['promedio_diario'] = df_newton_filtered['total'] / df_newton_filtered['cantidad_trabajos']
+                df_newton_filtered['promedio_diario'] = df_newton_filtered['total_diario'] / df_newton_filtered['cantidad_trabajos']
                 
                 df_pivot = df_newton_filtered.pivot_table(
                     index='fecha',
@@ -314,10 +316,10 @@ with tab3:
                 # Resumen general
                 summary = df_newton_filtered.groupby('categoria_producto').agg({
                     'cantidad_trabajos': 'sum',
-                    'total': 'sum'
+                    'total_diario': 'sum'
                 }).reset_index()
                 
-                summary['promedio_general'] = summary['total'] / summary['cantidad_trabajos']
+                summary['promedio_general'] = summary['total_diario'] / summary['cantidad_trabajos']
                 summary.columns = ['Categoría', 'Total Trabajos', 'Total ($)', 'Promedio General ($)']
                 summary['Total ($)'] = summary['Total ($)'].apply(lambda x: f"${x:,.2f}")
                 summary['Promedio General ($)'] = summary['Promedio General ($)'].apply(lambda x: f"${x:,.2f}")
@@ -328,21 +330,25 @@ with tab3:
                 with col1:
                     newton_data = df_newton_filtered[df_newton_filtered['categoria_producto'] == 'Newton']
                     if not newton_data.empty:
-                        promedio_newton = newton_data['total'].sum() / newton_data['cantidad_trabajos'].sum()
+                        total_newton = newton_data['total_diario'].sum()
+                        cant_newton = newton_data['cantidad_trabajos'].sum()
+                        promedio_newton = total_newton / cant_newton
                         st.metric(
                             "Newton - Trabajos",
-                            f"{int(newton_data['cantidad_trabajos'].sum()):,}",
-                            f"Promedio: ${promedio_newton:,.2f}"
+                            f"{int(cant_newton):,}",
+                            f"Total: ${total_newton:,.2f} | Promedio: ${promedio_newton:,.2f}"
                         )
                 
                 with col2:
                     newton_plus_data = df_newton_filtered[df_newton_filtered['categoria_producto'] == 'Newton Plus']
                     if not newton_plus_data.empty:
-                        promedio_plus = newton_plus_data['total'].sum() / newton_plus_data['cantidad_trabajos'].sum()
+                        total_plus = newton_plus_data['total_diario'].sum()
+                        cant_plus = newton_plus_data['cantidad_trabajos'].sum()
+                        promedio_plus = total_plus / cant_plus
                         st.metric(
                             "Newton Plus - Trabajos",
-                            f"{int(newton_plus_data['cantidad_trabajos'].sum()):,}",
-                            f"Promedio: ${promedio_plus:,.2f}"
+                            f"{int(cant_plus):,}",
+                            f"Total: ${total_plus:,.2f} | Promedio: ${promedio_plus:,.2f}"
                         )
             else:
                 st.info("Sin datos de Newton o Newton Plus para este año")
@@ -361,38 +367,7 @@ with tab4:
         
         where_mes = f"AND SUBSTR(f.fechaemision, 1, 7) = '{mes_sel}'" if mes_sel != "Todos" else ""
         
-        # Gráfico 1: Top 10 Clientes (por total)
-        st.write("### 🏆 Top 10 Clientes por Monto Total")
-        query_top_clientes = f"""
-        SELECT 
-            COALESCE(f.empresa_cliente, 'Sin empresa') as cliente,
-            COUNT(DISTINCT f.numerofactura) as cantidad,
-            SUM(COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0)) as total
-        FROM facturas f
-        WHERE SUBSTR(f.fechaemision, 1, 4) = '{ano_sel}' 
-          AND f.fechaemision IS NOT NULL
-          {where_mes}
-        GROUP BY cliente
-        ORDER BY total DESC
-        LIMIT 10
-        """
-        
-        df_top_clientes = pd.read_sql_query(query_top_clientes, conn)
-        
-        if not df_top_clientes.empty:
-            fig_clientes = px.bar(
-                df_top_clientes,
-                x='total',
-                y='cliente',
-                orientation='h',
-                title='Top 10 Clientes',
-                labels={'total': 'Total ($)', 'cliente': 'Cliente'},
-                color='total',
-                color_continuous_scale='Viridis'
-            )
-            st.plotly_chart(fig_clientes, use_container_width=True)
-        
-        # Gráfico 2: Distribución por rango de montos
+        # Gráfico 1: Distribución por rango de montos
         st.write("### 📊 Distribución por Rango de Montos")
         query_rangos = f"""
         SELECT 
@@ -419,12 +394,13 @@ with tab4:
                 go.Pie(
                     labels=df_rangos['rango'],
                     values=df_rangos['cantidad'],
-                    title='Distribución de Facturas por Rango de Monto'
+                    title='Distribución de Facturas por Rango de Monto',
+                    hovertemplate='<b>%{label}</b><br>Cantidad: %{value}<extra></extra>'
                 )
             ])
             st.plotly_chart(fig_rangos, use_container_width=True)
         
-        # Gráfico 3: Tendencia de facturación por día
+        # Gráfico 2: Tendencia de facturación por día
         st.write("### 📈 Tendencia Diaria de Facturación")
         query_diario = f"""
         SELECT 
@@ -440,7 +416,6 @@ with tab4:
         """
         
         df_diario = pd.read_sql_query(query_diario, conn)
-        conn.close()
         
         if not df_diario.empty:
             fig_diario = go.Figure()
@@ -471,6 +446,40 @@ with tab4:
             )
             
             st.plotly_chart(fig_diario, use_container_width=True)
+        
+        # Gráfico 3: Top Subcategorías
+        st.write("### 🏆 Top 10 Subcategorías")
+        query_top_sub = f"""
+        SELECT 
+            COALESCE(lf.clasificacion_subcategoria, 'Sin subcategoría') as subcategoria,
+            COUNT(DISTINCT f.numerofactura) as cantidad,
+            SUM(COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0)) as total
+        FROM lineas_factura lf
+        INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
+        WHERE SUBSTR(f.fechaemision, 1, 4) = '{ano_sel}' 
+          AND f.fechaemision IS NOT NULL
+          {where_mes}
+          AND lf.numlinea = 1
+        GROUP BY subcategoria
+        ORDER BY total DESC
+        LIMIT 10
+        """
+        
+        df_top_sub = pd.read_sql_query(query_top_sub, conn)
+        conn.close()
+        
+        if not df_top_sub.empty:
+            fig_top = px.bar(
+                df_top_sub,
+                x='total',
+                y='subcategoria',
+                orientation='h',
+                title='Top 10 Subcategorías por Monto Total',
+                labels={'total': 'Total ($)', 'subcategoria': 'Subcategoría'},
+                color='total',
+                color_continuous_scale='Blues'
+            )
+            st.plotly_chart(fig_top, use_container_width=True)
     
     except Exception as e:
         st.error(f"Error en Tab 4: {str(e)}")
@@ -478,5 +487,3 @@ with tab4:
 # ========== FOOTER ==========
 st.markdown("---")
 st.caption(f"Última actualización: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-
-
