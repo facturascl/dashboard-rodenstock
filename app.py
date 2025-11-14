@@ -18,6 +18,8 @@ def init_database_if_needed():
     if os.path.exists(DB_FILE):
         return
     
+    st.info("⏳ Creando base de datos con datos históricos... (esto toma ~1 minuto)")
+    
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     
@@ -41,7 +43,7 @@ def init_database_if_needed():
     )
     ''')
     
-    # Generar datos de ejemplo (433 facturas para Enero 2025)
+    # Categorías
     categorias = {
         'Monofocales': ['Policarbonato azul', 'Hi-index Verde', 'Polarizado', 'Fotocromático', 'Policarbonato verde', 'CR39'],
         'Progresivo': ['Verde', 'Azul', 'Fotocromático'],
@@ -106,6 +108,7 @@ def init_database_if_needed():
     
     conn.commit()
     conn.close()
+    st.success("✓ Base de datos creada exitosamente")
 
 # ============================================================================
 # STREAMLIT CONFIG
@@ -121,8 +124,8 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-@st.cache_resource
 def get_conn():
+    """Retorna conexión a la BD sin cache"""
     return sqlite3.connect(DB_FILE)
 
 @st.cache_data(ttl=600)
@@ -135,9 +138,11 @@ def get_anos_disponibles():
     """
     try:
         df = pd.read_sql_query(query, conn)
+        conn.close()
         anos = sorted(set(df['ano'].tolist())) if not df.empty else [datetime.now().year]
         return sorted(anos, reverse=True)
-    except:
+    except Exception as e:
+        conn.close()
         return [datetime.now().year]
 
 @st.cache_data(ttl=600)
@@ -151,8 +156,10 @@ def get_meses_por_ano(ano):
     """
     try:
         df = pd.read_sql_query(query, conn)
+        conn.close()
         return sorted(df['mes'].tolist()) if not df.empty else []
-    except:
+    except Exception as e:
+        conn.close()
         return []
 
 def format_currency(value):
@@ -184,6 +191,7 @@ def get_evolucion_mensual(ano):
     ORDER BY mes
     """
     df = pd.read_sql_query(query, conn)
+    conn.close()
     df['mes_nombre'] = df['mes'].apply(lambda x: mes_nombre(x))
     return df
 
@@ -240,7 +248,9 @@ def get_categorias_por_periodo(ano, mes=None):
     CROSS JOIN totales_periodo tp
     ORDER BY total_ingresos DESC
     """
-    return pd.read_sql_query(query, conn)
+    df = pd.read_sql_query(query, conn)
+    conn.close()
+    return df
 
 @st.cache_data(ttl=600)
 def get_subcategorias_por_periodo(ano, mes=None, categoria=None):
@@ -299,7 +309,9 @@ def get_subcategorias_por_periodo(ano, mes=None, categoria=None):
     CROSS JOIN totales_periodo tp
     ORDER BY total_ingresos DESC
     """
-    return pd.read_sql_query(query, conn)
+    df = pd.read_sql_query(query, conn)
+    conn.close()
+    return df
 
 @st.cache_data(ttl=600)
 def get_comparativa_mes_categoria(ano):
@@ -352,6 +364,7 @@ def get_comparativa_mes_categoria(ano):
     ORDER BY rmc.mes, rmc.total_ingresos DESC
     """
     df = pd.read_sql_query(query, conn)
+    conn.close()
     if not df.empty:
         df['mes_nombre'] = df['mes'].apply(lambda x: mes_nombre(x))
     return df
@@ -375,7 +388,9 @@ def get_totales_periodo(ano, mes=None):
     WHERE CAST(STRFTIME('%Y', fechaemision) AS INTEGER) = {ano}
       {filtro_mes}
     """
-    return pd.read_sql_query(query, conn)
+    df = pd.read_sql_query(query, conn)
+    conn.close()
+    return df
 
 @st.cache_data(ttl=600)
 def get_newton_diario(ano, mes=None):
@@ -424,7 +439,9 @@ def get_newton_diario(ano, mes=None):
     FROM resumen_diario
     ORDER BY dia DESC
     """
-    return pd.read_sql_query(query, conn)
+    df = pd.read_sql_query(query, conn)
+    conn.close()
+    return df
 
 # ============================================================================
 # UI
@@ -823,4 +840,4 @@ with tab6:
         st.warning("No hay datos")
 
 st.markdown("---")
-st.caption("📊 Dashboard Rodenstock | © 2025 | Versión Corregida + Auto-Init")
+st.caption("📊 Dashboard Rodenstock | © 2025 | ✓ Auto-Init con Datos Históricos 2020-2025")
