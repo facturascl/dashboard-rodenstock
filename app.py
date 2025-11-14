@@ -6,7 +6,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 import sqlite3
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 
 st.set_page_config(
     page_title="Dashboard Rodenstock Pro",
@@ -60,42 +60,72 @@ tab1, tab2, tab3, tab4 = st.tabs([
 with tab1:
     st.subheader("📊 Evolución Mensual: Facturas y Gastos")
     
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     with col1:
         ano_sel1 = st.selectbox("📅 Año 1", options=anos_list, key="ano1")
     with col2:
-        ano_sel2 = st.selectbox("📅 Año 2 (Comparación Opcional)", options=["---"] + anos_list, key="ano2")
+        ano_sel2 = st.selectbox("📅 Año 2 (Comparación)", options=["---"] + anos_list, key="ano2")
+    with col3:
+        mes_sel = st.selectbox("📅 Mes (Opcional)", options=["Todos"] + [f"{i:02d}" for i in range(1, 13)], key="mes_sel")
     
     try:
         conn = get_db_connection()
         
-        query1 = f"""
-        SELECT 
-            SUBSTR(f.fechaemision, 1, 7) as mes,
-            COUNT(DISTINCT f.numerofactura) as cantidad_facturas,
-            SUM(COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0)) as total_mes
-        FROM facturas f
-        WHERE SUBSTR(f.fechaemision, 1, 4) = '{ano_sel1}' 
-          AND f.fechaemision IS NOT NULL
-        GROUP BY mes
-        ORDER BY mes
-        """
-        
-        df_mensual1 = pd.read_sql_query(query1, conn)
-        
-        df_mensual2 = pd.DataFrame()
-        if ano_sel2 != "---":
-            query2 = f"""
+        if mes_sel == "Todos":
+            query1 = f"""
             SELECT 
                 SUBSTR(f.fechaemision, 1, 7) as mes,
                 COUNT(DISTINCT f.numerofactura) as cantidad_facturas,
                 SUM(COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0)) as total_mes
             FROM facturas f
-            WHERE SUBSTR(f.fechaemision, 1, 4) = '{ano_sel2}' 
+            WHERE SUBSTR(f.fechaemision, 1, 4) = '{ano_sel1}' 
               AND f.fechaemision IS NOT NULL
             GROUP BY mes
             ORDER BY mes
             """
+        else:
+            query1 = f"""
+            SELECT 
+                SUBSTR(f.fechaemision, 1, 7) as mes,
+                COUNT(DISTINCT f.numerofactura) as cantidad_facturas,
+                SUM(COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0)) as total_mes
+            FROM facturas f
+            WHERE SUBSTR(f.fechaemision, 1, 4) = '{ano_sel1}' 
+              AND SUBSTR(f.fechaemision, 6, 2) = '{mes_sel}'
+              AND f.fechaemision IS NOT NULL
+            GROUP BY mes
+            ORDER BY mes
+            """
+        
+        df_mensual1 = pd.read_sql_query(query1, conn)
+        
+        df_mensual2 = pd.DataFrame()
+        if ano_sel2 != "---":
+            if mes_sel == "Todos":
+                query2 = f"""
+                SELECT 
+                    SUBSTR(f.fechaemision, 1, 7) as mes,
+                    COUNT(DISTINCT f.numerofactura) as cantidad_facturas,
+                    SUM(COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0)) as total_mes
+                FROM facturas f
+                WHERE SUBSTR(f.fechaemision, 1, 4) = '{ano_sel2}' 
+                  AND f.fechaemision IS NOT NULL
+                GROUP BY mes
+                ORDER BY mes
+                """
+            else:
+                query2 = f"""
+                SELECT 
+                    SUBSTR(f.fechaemision, 1, 7) as mes,
+                    COUNT(DISTINCT f.numerofactura) as cantidad_facturas,
+                    SUM(COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0)) as total_mes
+                FROM facturas f
+                WHERE SUBSTR(f.fechaemision, 1, 4) = '{ano_sel2}' 
+                  AND SUBSTR(f.fechaemision, 6, 2) = '{mes_sel}'
+                  AND f.fechaemision IS NOT NULL
+                GROUP BY mes
+                ORDER BY mes
+                """
             df_mensual2 = pd.read_sql_query(query2, conn)
         
         conn.close()
@@ -143,8 +173,12 @@ with tab1:
                     line=dict(color='#ff6b6b', width=3, dash='dash')
                 ))
             
+            titulo = f"Comparación: {ano_sel1}" + (f" vs {ano_sel2}" if ano_sel2 != "---" else "")
+            if mes_sel != "Todos":
+                titulo += f" - Mes {mes_sel}"
+            
             fig.update_layout(
-                title=f"Comparación: {ano_sel1}" + (f" vs {ano_sel2}" if ano_sel2 != "---" else ""),
+                title=titulo,
                 xaxis_title="Mes",
                 yaxis_title="Cantidad de Facturas",
                 yaxis2=dict(title="Total ($)", overlaying='y', side='right'),
@@ -176,7 +210,7 @@ with tab1:
         st.error(f"Error en Tab 1: {str(e)}")
 
 with tab2:
-    st.subheader("🏷️ Análisis por Categoría y Subcategoría")
+    st.subheader("🏷️ Análisis por Categoría y Subcategoría (SIN MEZCLA)")
     
     ano_sel = st.selectbox("📅 Año", options=anos_list, key="ano_tab2")
     
@@ -185,6 +219,7 @@ with tab2:
         
         query = f"""
         SELECT 
+            lf.linea_numero,
             COALESCE(lf.clasificacion_categoria, 'Sin categoría') as categoria,
             COALESCE(lf.clasificacion_subcategoria, 'Sin subcategoría') as subcategoria,
             COUNT(DISTINCT f.numerofactura) as cantidad_trabajos,
@@ -193,8 +228,7 @@ with tab2:
         INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
         WHERE SUBSTR(f.fechaemision, 1, 4) = '{ano_sel}' 
           AND f.fechaemision IS NOT NULL
-          AND lf.linea_numero = 1
-        GROUP BY categoria, subcategoria
+        GROUP BY lf.linea_numero, categoria, subcategoria
         ORDER BY total_subcategoria DESC
         """
         
@@ -208,21 +242,23 @@ with tab2:
             df_cat['promedio'] = df_cat['total_subcategoria'] / df_cat['cantidad_trabajos']
             df_cat['porcentaje'] = (df_cat['total_subcategoria'] / total_general * 100).round(2)
             
+            df_cat['categoria_subcategoria'] = df_cat['categoria'] + ' - ' + df_cat['subcategoria']
+            
             fig = px.bar(
                 df_cat.sort_values('total_subcategoria', ascending=True),
                 x='total_subcategoria',
-                y='subcategoria',
+                y='categoria_subcategoria',
                 color='categoria',
                 orientation='h',
-                title=f"Total por Subcategoría ({ano_sel})",
-                labels={'total_subcategoria': 'Total ($)', 'subcategoria': 'Subcategoría'},
-                height=600
+                title=f"Total por Categoría/Subcategoría ({ano_sel}) - SIN MEZCLA",
+                labels={'total_subcategoria': 'Total ($)', 'categoria_subcategoria': 'Categoría - Subcategoría'},
+                height=700
             )
             
             st.plotly_chart(fig, use_container_width=True)
             
-            df_display = df_cat[['categoria', 'subcategoria', 'cantidad_trabajos', 'total_subcategoria', 'promedio', 'porcentaje']].copy()
-            df_display.columns = ['Categoría', 'Subcategoría', 'Cantidad', 'Total ($)', 'Promedio ($)', '% del Total']
+            df_display = df_cat[['categoria', 'subcategoria', 'linea_numero', 'cantidad_trabajos', 'total_subcategoria', 'promedio', 'porcentaje']].copy()
+            df_display.columns = ['Categoría', 'Subcategoría', 'Línea', 'Cantidad', 'Total ($)', 'Promedio ($)', '% del Total']
             df_display['Total ($)'] = df_display['Total ($)'].apply(lambda x: f"${x:,.2f}")
             df_display['Promedio ($)'] = df_display['Promedio ($)'].apply(lambda x: f"${x:,.2f}")
             df_display['% del Total'] = df_display['% del Total'].apply(lambda x: f"{x:.2f}%")
@@ -243,9 +279,18 @@ with tab2:
         st.error(f"Error en Tab 2: {str(e)}")
 
 with tab3:
-    st.subheader("🔄 Newton vs Newton Plus: Análisis Diario con Promedio")
+    st.subheader("🔄 Newton vs Newton Plus: Rango de Fechas")
     
     ano_sel = st.selectbox("📅 Año", options=anos_list, key="ano_tab3")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        fecha_inicio = st.date_input("📅 Fecha Inicio", key="fecha_inicio")
+    with col2:
+        fecha_fin = st.date_input("📅 Fecha Fin", key="fecha_fin")
+    
+    fecha_inicio_str = fecha_inicio.strftime("%Y-%m-%d")
+    fecha_fin_str = fecha_fin.strftime("%Y-%m-%d")
     
     try:
         conn = get_db_connection()
@@ -263,6 +308,8 @@ with tab3:
         FROM lineas_factura lf
         INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
         WHERE SUBSTR(f.fechaemision, 1, 4) = '{ano_sel}' 
+          AND f.fechaemision >= '{fecha_inicio_str}'
+          AND f.fechaemision <= '{fecha_fin_str}'
           AND f.fechaemision IS NOT NULL
           AND lf.linea_numero = 1
         GROUP BY fecha, categoria_producto
@@ -328,7 +375,7 @@ with tab3:
                     ))
                 
                 fig.update_layout(
-                    title="Newton vs Newton Plus: Cantidad y Promedio Diario",
+                    title=f"Newton vs Newton Plus: {fecha_inicio_str} a {fecha_fin_str}",
                     xaxis_title="Fecha",
                     yaxis=dict(title="Cantidad", side='left'),
                     yaxis2=dict(title="Promedio ($)", overlaying='y', side='right'),
@@ -375,9 +422,9 @@ with tab3:
                             f"Total: ${total_plus:,.2f} | Promedio: ${promedio_plus:,.2f}"
                         )
             else:
-                st.info("Sin datos de Newton o Newton Plus para este año")
+                st.info("Sin datos de Newton o Newton Plus para este rango")
         else:
-            st.info("Sin datos para este año")
+            st.info("Sin datos para este rango")
         
     except Exception as e:
         st.error(f"Error en Tab 3: {str(e)}")
