@@ -1,6 +1,4 @@
-cd /Users/cristian.ibanez/Documents/Facturas/Perplexity
 
-cat > .gitignore << EOF
 # Credenciales (NUNCA subir)
 bigquery-credentials.json
 credentials.json
@@ -38,4 +36,8 @@ Rodenstock/
 
 # Mac
 .DS_Store
-EOF
+
+facturas.db
+   __pycache__/
+   *.pyc
+   .streamlit/
