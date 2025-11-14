@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -7,7 +6,6 @@ import sqlite3
 import os
 from datetime import datetime, timedelta
 import random
-import hashlib
 
 DB_FILE = "facturas.db"
 
@@ -19,8 +17,6 @@ def init_database_if_needed():
     """Crea la BD automáticamente si no existe"""
     if os.path.exists(DB_FILE):
         return
-    
-    st.info("⏳ Creando base de datos con datos históricos... (esto toma ~1 minuto)")
     
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
@@ -45,12 +41,21 @@ def init_database_if_needed():
     )
     ''')
     
-    # Categorías
+    # Generar datos de ejemplo (433 facturas para Enero 2025)
     categorias = {
         'Monofocales': ['Policarbonato azul', 'Hi-index Verde', 'Polarizado', 'Fotocromático', 'Policarbonato verde', 'CR39'],
         'Progresivo': ['Verde', 'Azul', 'Fotocromático'],
         'Newton': ['Newton Standard'],
         'Newton Plus': ['Newton Plus Premium'],
+    }
+    
+    yearly_facturas = {
+        2020: 4500,
+        2021: 6000,
+        2022: 6500,
+        2023: 6500,
+        2024: 6500,
+        2025: 4500
     }
     
     def get_categoria():
@@ -64,80 +69,43 @@ def init_database_if_needed():
         else:
             return 'Newton Plus'
     
-    def get_deterministic_values(numerofactura):
-        """Genera subtotal/iva DETERMINÍSTICOS basados en el número de factura"""
-        # Usa hash de la factura para generar siempre los mismos valores
-        hash_val = int(hashlib.md5(numerofactura.encode()).hexdigest(), 16)
-        random.seed(hash_val)
-        subtotal = round(random.uniform(800, 3200), 2)
-        iva = round(subtotal * 0.19, 2)
-        return subtotal, iva
-    
-    # ✅ NÚMEROS REALES CONTADOS MANUALMENTE
-    facturas_por_mes_dict = {
-        2020: {i: 375 for i in range(1, 13)},  # 4500 total
-        2021: {i: 500 for i in range(1, 13)},  # 6000 total
-        2022: {i: 541 + (1 if i <= 8 else 0) for i in range(1, 13)},  # 6500 total
-        2023: {i: 541 + (1 if i <= 8 else 0) for i in range(1, 13)},  # 6500 total
-        2024: {i: 542 + (1 if i <= 8 else 0) for i in range(1, 13)},  # 6500 total
-        2025: {
-            1: 433, 2: 433, 3: 433, 4: 433, 5: 433, 6: 433,
-            7: 433, 8: 433, 9: 669, 10: 669, 11: 669  # 5471 total
-        }
-    }
-    
     factura_num = 1000
     for year in range(2020, 2026):
-        meses_activos = 11 if year == 2025 else 12
+        start_date = datetime(year, 1, 1)
+        if year == 2025:
+            end_date = datetime(2025, 11, 30)
+        else:
+            end_date = datetime(year, 12, 31)
         
-        for mes in range(1, meses_activos + 1):
-            cant_facturas_este_mes = facturas_por_mes_dict[year][mes]
+        num_facturas = yearly_facturas[year]
+        days_diff = (end_date - start_date).days
+        
+        for i in range(num_facturas):
+            random_days = random.randint(0, days_diff)
+            fecha = start_date + timedelta(days=random_days)
+            fecha_str = fecha.strftime('%Y-%m-%d')
             
-            # Calcular rango de días del mes
-            if mes < 12:
-                proximus_mes = datetime(year, mes + 1, 1)
-            else:
-                proximus_mes = datetime(year + 1, 1, 1)
+            numerofactura = f"FAC{factura_num:06d}"
+            factura_num += 1
             
-            start_date = datetime(year, mes, 1)
-            end_date = proximus_mes - timedelta(days=1)
-            days_diff = (end_date - start_date).days + 1
+            subtotal = round(random.uniform(100, 5000), 2)
+            iva = round(subtotal * 0.19, 2)
             
-            # GENERADOR: CADA FACTURA EN EL LOOP
-            for i in range(cant_facturas_este_mes):
-                # Fecha uniforme
-                posicion = i / max(cant_facturas_este_mes - 1, 1) if cant_facturas_este_mes > 1 else 0.5
-                dia_offset = int(days_diff * posicion)
-                fecha = start_date + timedelta(days=dia_offset)
-                fecha_str = fecha.strftime('%Y-%m-%d')
-                
-                # Número único de factura
-                numerofactura = f"FAC{factura_num:06d}"
-                factura_num += 1
-                
-                # ✅ VALORES DETERMINÍSTICOS (siempre iguales para la misma factura)
-                subtotal, iva = get_deterministic_values(numerofactura)
-                
-                # Insertar factura
-                cursor.execute(
-                    'INSERT OR IGNORE INTO facturas VALUES (?, ?, ?, ?)',
-                    (numerofactura, fecha_str, subtotal, iva)
-                )
-                
-                # Generar categoría (también determinística)
-                random.seed(int(numerofactura[3:]))
-                categoria = get_categoria()
-                subcategoria = random.choice(categorias.get(categoria, ['Sin subcategoría']))
-                
-                # Insertar línea de factura
-                cursor.execute(
-                    'INSERT INTO lineas_factura (numerofactura, clasificacion_categoria, clasificacion_subcategoria) VALUES (?, ?, ?)',
-                    (numerofactura, categoria, subcategoria)
-                )
+            cursor.execute(
+                'INSERT OR IGNORE INTO facturas VALUES (?, ?, ?, ?)',
+                (numerofactura, fecha_str, subtotal, iva)
+            )
+            
+            categoria = get_categoria()
+            subcategoria = random.choice(categorias.get(categoria, ['Sin subcategoría']))
+            
+            cursor.execute(
+                'INSERT INTO lineas_factura (numerofactura, clasificacion_categoria, clasificacion_subcategoria) VALUES (?, ?, ?)',
+                (numerofactura, categoria, subcategoria)
+            )
     
     conn.commit()
     conn.close()
-    st.success("✓ Base de datos creada exitosamente con 30,471 facturas (2020-2025)")
 
 # ============================================================================
 # STREAMLIT CONFIG
@@ -153,8 +121,8 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+@st.cache_resource
 def get_conn():
-    """Retorna conexión a la BD sin cache"""
     return sqlite3.connect(DB_FILE)
 
 @st.cache_data(ttl=600)
@@ -167,11 +135,9 @@ def get_anos_disponibles():
     """
     try:
         df = pd.read_sql_query(query, conn)
-        conn.close()
         anos = sorted(set(df['ano'].tolist())) if not df.empty else [datetime.now().year]
         return sorted(anos, reverse=True)
-    except Exception as e:
-        conn.close()
+    except:
         return [datetime.now().year]
 
 @st.cache_data(ttl=600)
@@ -185,10 +151,8 @@ def get_meses_por_ano(ano):
     """
     try:
         df = pd.read_sql_query(query, conn)
-        conn.close()
         return sorted(df['mes'].tolist()) if not df.empty else []
-    except Exception as e:
-        conn.close()
+    except:
         return []
 
 def format_currency(value):
@@ -220,7 +184,6 @@ def get_evolucion_mensual(ano):
     ORDER BY mes
     """
     df = pd.read_sql_query(query, conn)
-    conn.close()
     df['mes_nombre'] = df['mes'].apply(lambda x: mes_nombre(x))
     return df
 
@@ -277,9 +240,7 @@ def get_categorias_por_periodo(ano, mes=None):
     CROSS JOIN totales_periodo tp
     ORDER BY total_ingresos DESC
     """
-    df = pd.read_sql_query(query, conn)
-    conn.close()
-    return df
+    return pd.read_sql_query(query, conn)
 
 @st.cache_data(ttl=600)
 def get_subcategorias_por_periodo(ano, mes=None, categoria=None):
@@ -338,9 +299,7 @@ def get_subcategorias_por_periodo(ano, mes=None, categoria=None):
     CROSS JOIN totales_periodo tp
     ORDER BY total_ingresos DESC
     """
-    df = pd.read_sql_query(query, conn)
-    conn.close()
-    return df
+    return pd.read_sql_query(query, conn)
 
 @st.cache_data(ttl=600)
 def get_comparativa_mes_categoria(ano):
@@ -393,7 +352,6 @@ def get_comparativa_mes_categoria(ano):
     ORDER BY rmc.mes, rmc.total_ingresos DESC
     """
     df = pd.read_sql_query(query, conn)
-    conn.close()
     if not df.empty:
         df['mes_nombre'] = df['mes'].apply(lambda x: mes_nombre(x))
     return df
@@ -417,9 +375,7 @@ def get_totales_periodo(ano, mes=None):
     WHERE CAST(STRFTIME('%Y', fechaemision) AS INTEGER) = {ano}
       {filtro_mes}
     """
-    df = pd.read_sql_query(query, conn)
-    conn.close()
-    return df
+    return pd.read_sql_query(query, conn)
 
 @st.cache_data(ttl=600)
 def get_newton_diario(ano, mes=None):
@@ -468,9 +424,7 @@ def get_newton_diario(ano, mes=None):
     FROM resumen_diario
     ORDER BY dia DESC
     """
-    df = pd.read_sql_query(query, conn)
-    conn.close()
-    return df
+    return pd.read_sql_query(query, conn)
 
 # ============================================================================
 # UI
@@ -869,4 +823,4 @@ with tab6:
         st.warning("No hay datos")
 
 st.markdown("---")
-st.caption("📊 Dashboard Rodenstock | © 2025 | ✓ 30,471 Facturas (2020-2025) | Valores DETERMINÍSTICOS (consistentes)")
+st.caption("📊 Dashboard Rodenstock | © 2025 | Versión Corregida + Auto-Init")
