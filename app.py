@@ -7,6 +7,7 @@ import sqlite3
 import os
 from datetime import datetime, timedelta
 import random
+import hashlib
 
 DB_FILE = "facturas.db"
 
@@ -63,6 +64,15 @@ def init_database_if_needed():
         else:
             return 'Newton Plus'
     
+    def get_deterministic_values(numerofactura):
+        """Genera subtotal/iva DETERMINÍSTICOS basados en el número de factura"""
+        # Usa hash de la factura para generar siempre los mismos valores
+        hash_val = int(hashlib.md5(numerofactura.encode()).hexdigest(), 16)
+        random.seed(hash_val)
+        subtotal = round(random.uniform(800, 3200), 2)
+        iva = round(subtotal * 0.19, 2)
+        return subtotal, iva
+    
     # ✅ NÚMEROS REALES CONTADOS MANUALMENTE
     facturas_por_mes_dict = {
         2020: {i: 375 for i in range(1, 13)},  # 4500 total
@@ -93,7 +103,7 @@ def init_database_if_needed():
             end_date = proximus_mes - timedelta(days=1)
             days_diff = (end_date - start_date).days + 1
             
-            # ✅ GENERADOR CORREGIDO: CADA FACTURA SE GENERA EN EL LOOP
+            # GENERADOR: CADA FACTURA EN EL LOOP
             for i in range(cant_facturas_este_mes):
                 # Fecha uniforme
                 posicion = i / max(cant_facturas_este_mes - 1, 1) if cant_facturas_este_mes > 1 else 0.5
@@ -105,9 +115,8 @@ def init_database_if_needed():
                 numerofactura = f"FAC{factura_num:06d}"
                 factura_num += 1
                 
-                # ✅ CRÍTICO: subtotal e iva generados DENTRO DEL LOOP para cada factura
-                subtotal = round(random.uniform(100, 5000), 2)
-                iva = round(subtotal * 0.19, 2)
+                # ✅ VALORES DETERMINÍSTICOS (siempre iguales para la misma factura)
+                subtotal, iva = get_deterministic_values(numerofactura)
                 
                 # Insertar factura
                 cursor.execute(
@@ -115,7 +124,8 @@ def init_database_if_needed():
                     (numerofactura, fecha_str, subtotal, iva)
                 )
                 
-                # Generar categoría para esta factura
+                # Generar categoría (también determinística)
+                random.seed(int(numerofactura[3:]))
                 categoria = get_categoria()
                 subcategoria = random.choice(categorias.get(categoria, ['Sin subcategoría']))
                 
@@ -859,4 +869,4 @@ with tab6:
         st.warning("No hay datos")
 
 st.markdown("---")
-st.caption("📊 Dashboard Rodenstock | © 2025 | ✓ 30,471 Facturas (2020-2025) | Enero 2025: 433 | Octubre: 669")
+st.caption("📊 Dashboard Rodenstock | © 2025 | ✓ 30,471 Facturas (2020-2025) | Valores DETERMINÍSTICOS (consistentes)")
