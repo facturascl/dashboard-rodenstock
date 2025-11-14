@@ -88,22 +88,22 @@ def get_totales_periodo(ano_sel, mes_param):
 
 @st.cache_data(ttl=600)
 def get_resumen_facturas(ano_sel, mes_param):
-    """Resumen detallado de facturas"""
+    """Resumen detallado de facturas - SIN DOBLE CONTEO"""
     query = f"""
     SELECT
         f.numerofactura,
         DATE(f.fechaemision) as fecha,
         f.descripcion,
-        COUNT(DISTINCT lf.linea_numero) as items,
+        (SELECT COUNT(DISTINCT linea_numero) 
+         FROM lineas_factura 
+         WHERE numerofactura = f.numerofactura) as items,
         CAST(f.subtotal AS INTEGER) as subtotal,
         CAST(f.iva AS INTEGER) as iva,
         CAST(f.subtotal + f.iva AS INTEGER) as total
     FROM facturas f
-    LEFT JOIN lineas_factura lf ON f.numerofactura = lf.numerofactura
     WHERE CAST(STRFTIME('%Y', f.fechaemision) AS INTEGER) = {ano_sel}
     AND CAST(STRFTIME('%m', f.fechaemision) AS INTEGER) = {mes_param}
     AND f.fechaemision IS NOT NULL
-    GROUP BY f.numerofactura, f.fechaemision, f.descripcion
     ORDER BY f.fechaemision DESC
     """
     return pd.read_sql_query(query, conn)
