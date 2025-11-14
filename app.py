@@ -486,15 +486,3 @@ st.markdown("---")
 st.caption(f"Última actualización: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 ```
 
-## **CAMBIOS CLAVE:**
-
-✅ **Tab 2:** `COUNT(DISTINCT f.numerofactura)` - Contamos facturas únicas, no líneas  
-✅ **Tab 3:** Mismo fix - facturas únicas  
-✅ **Tab 4:** Reemplazamos tabla detallada con:
-   - Top 10 Clientes por monto
-   - Distribución por rango de montos (pie chart)
-   - Tendencia diaria de facturación
-
-✅ **Totales consistentes:** Siempre 1 factura = 1 trabajo
-
-**Copia y pega en `app.py` ¡LISTO! 👊**
