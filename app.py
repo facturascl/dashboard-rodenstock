@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 
 import streamlit as st
 import pandas as pd
@@ -57,6 +56,7 @@ tab1, tab2, tab3, tab4 = st.tabs([
     "📊 Gráficos Avanzados"
 ])
 
+# ==================== TAB 1: ANÁLISIS MENSUAL ====================
 with tab1:
     st.subheader("📊 Evolución Mensual: Facturas y Gastos")
     
@@ -209,6 +209,7 @@ with tab1:
     except Exception as e:
         st.error(f"Error en Tab 1: {str(e)}")
 
+# ==================== TAB 2: POR CATEGORÍA/SUBCATEGORÍA ====================
 with tab2:
     st.subheader("🏷️ Análisis por Categoría y Subcategoría")
     
@@ -227,10 +228,7 @@ with tab2:
                 COALESCE(lf.clasificacion_categoria, 'Sin categoría') as categoria,
                 COALESCE(lf.clasificacion_subcategoria, 'Sin subcategoría') as subcategoria,
                 COUNT(DISTINCT lf.numerofactura) as cantidad_facturas,
-                SUM(DISTINCT CASE 
-                    WHEN lf.linea_numero = 1 THEN COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0)
-                    ELSE 0
-                END) as total_subcategoria
+                SUM(COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0)) as total_subcategoria
             FROM lineas_factura lf
             INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
             WHERE SUBSTR(f.fechaemision, 1, 4) = '{ano_sel}' 
@@ -244,10 +242,7 @@ with tab2:
                 COALESCE(lf.clasificacion_categoria, 'Sin categoría') as categoria,
                 COALESCE(lf.clasificacion_subcategoria, 'Sin subcategoría') as subcategoria,
                 COUNT(DISTINCT lf.numerofactura) as cantidad_facturas,
-                SUM(DISTINCT CASE 
-                    WHEN lf.linea_numero = 1 THEN COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0)
-                    ELSE 0
-                END) as total_subcategoria
+                SUM(COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0)) as total_subcategoria
             FROM lineas_factura lf
             INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
             WHERE SUBSTR(f.fechaemision, 1, 4) = '{ano_sel}' 
@@ -303,6 +298,7 @@ with tab2:
     except Exception as e:
         st.error(f"Error en Tab 2: {str(e)}")
 
+# ==================== TAB 3: NEWTON VS NEWTON PLUS ====================
 with tab3:
     st.subheader("🔄 Newton vs Newton Plus: Rango de Fechas")
     
@@ -329,10 +325,7 @@ with tab3:
                 ELSE 'Otro'
             END as categoria_producto,
             COUNT(DISTINCT lf.numerofactura) as cantidad_facturas,
-            SUM(DISTINCT CASE 
-                WHEN lf.linea_numero = 1 THEN COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0)
-                ELSE 0
-            END) as total_diario
+            SUM(COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0)) as total_diario
         FROM lineas_factura lf
         INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
         WHERE SUBSTR(f.fechaemision, 1, 4) = '{ano_sel}' 
@@ -456,6 +449,7 @@ with tab3:
     except Exception as e:
         st.error(f"Error en Tab 3: {str(e)}")
 
+# ==================== TAB 4: GRÁFICOS AVANZADOS ====================
 with tab4:
     st.subheader("📊 Gráficos Avanzados de Análisis")
     
@@ -545,10 +539,7 @@ with tab4:
         SELECT 
             COALESCE(lf.clasificacion_subcategoria, 'Sin subcategoría') as subcategoria,
             COUNT(DISTINCT lf.numerofactura) as cantidad,
-            SUM(DISTINCT CASE 
-                WHEN lf.linea_numero = 1 THEN COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0)
-                ELSE 0
-            END) as total
+            SUM(COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0)) as total
         FROM lineas_factura lf
         INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
         WHERE SUBSTR(f.fechaemision, 1, 4) = '{ano_sel}' 
