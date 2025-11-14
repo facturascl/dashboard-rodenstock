@@ -36,7 +36,7 @@ try:
     anos_df = pd.read_sql_query(anos_query, conn)
     anos_disponibles = sorted(anos_df['ano'].tolist(), reverse=True) if not anos_df.empty else [2025]
     
-    ano_seleccionado = st.sidebar.selectbox("📅 Año para Comparar", ano_disponibles, key="ano_select")
+    ano_seleccionado = st.sidebar.selectbox("📅 Año para Comparar", anos_disponibles, key="ano_select")
     
 except Exception as e:
     st.error(f"Error al cargar años: {e}")
@@ -89,23 +89,39 @@ def get_subcategorias_completo(ano):
     return pd.read_sql_query(query, conn)
 
 @st.cache_data(ttl=300)
-def get_newton_diario(ano):
-    """Newton vs Newton Plus día a día"""
+def get_newton_rango(fecha_inicio, fecha_fin):
+    """Newton vs Newton Plus con rango de fechas: cantidad y promedio diario"""
     query = f"""
     SELECT 
         STRFTIME('%Y-%m-%d', f.fechaemision) as fecha,
         CASE WHEN lf.clasificacion_categoria = 'Newton' THEN 'Newton' ELSE 'Newton Plus' END as tipo,
         COUNT(DISTINCT lf.numerofactura) as cantidad,
-        CAST(SUM(f.subtotal + f.iva) AS INTEGER) as total
+        CAST(AVG(f.subtotal + f.iva) AS INTEGER) as promedio_diario
     FROM lineas_factura lf
     INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
-    WHERE CAST(STRFTIME('%Y', f.fechaemision) AS INTEGER) = {int(ano)}
+    WHERE f.fechaemision BETWEEN '{fecha_inicio}' AND '{fecha_fin}'
     AND lf.clasificacion_categoria IN ('Newton', 'Newton Plus')
     AND f.fechaemision IS NOT NULL
     GROUP BY fecha, tipo
     ORDER BY fecha DESC, tipo
     """
     return pd.read_sql_query(query, conn)
+
+@st.cache_data(ttl=300)
+def get_fechas_disponibles(ano):
+    """Obtener primer y último día con datos del año"""
+    query = f"""
+    SELECT 
+        MIN(STRFTIME('%Y-%m-%d', fechaemision)) as fecha_min,
+        MAX(STRFTIME('%Y-%m-%d', fechaemision)) as fecha_max
+    FROM facturas
+    WHERE CAST(STRFTIME('%Y', fechaemision) AS INTEGER) = {int(ano)}
+    AND lf.clasificacion_categoria IN ('Newton', 'Newton Plus')
+    """
+    result = pd.read_sql_query(query, conn)
+    if not result.empty and result['fecha_min'].iloc[0]:
+        return result['fecha_min'].iloc[0], result['fecha_max'].iloc[0]
+    return None, None
 
 @st.cache_data(ttl=300)
 def get_analisis_categorias(ano):
@@ -257,16 +273,23 @@ with tab2:
         st.info("ℹ️ Sin datos de subcategorías")
 
 # ============================================================
-# TAB 3: NEWTON VS NEWTON PLUS (DÍA A DÍA)
+# TAB 3: NEWTON VS NEWTON PLUS (DÍA A DÍA + RANGO)
 # ============================================================
 with tab3:
-    st.header(f"📈 Newton vs Newton Plus - Día a Día {ano_seleccionado}")
+    st.header(f"📈 Newton vs Newton Plus - Análisis por Día {ano_seleccionado}")
     
-    df_newton = get_newton_diario(ano_seleccionado)
+    # Selector de rango de fechas
+    col1, col2 = st.columns(2)
+    with col1:
+        fecha_inicio = st.date_input("📅 Fecha Inicio", value=pd.to_datetime(f"{ano_seleccionado}-01-01"))
+    with col2:
+        fecha_fin = st.date_input("📅 Fecha Fin", value=pd.to_datetime(f"{ano_seleccionado}-12-31"))
+    
+    df_newton = get_newton_rango(fecha_inicio.strftime('%Y-%m-%d'), fecha_fin.strftime('%Y-%m-%d'))
     
     if not df_newton.empty:
-        # Tabla
-        st.subheader("Detalle Diario")
+        # Tabla: Cantidad + Promedio Diario
+        st.subheader("Detalle Diario: Cantidad y Promedio")
         st.dataframe(
             df_newton,
             use_container_width=True,
@@ -275,36 +298,63 @@ with tab3:
                 "fecha": st.column_config.TextColumn("Fecha", width=120),
                 "tipo": st.column_config.TextColumn("Tipo", width=100),
                 "cantidad": st.column_config.NumberColumn("Cantidad", width=100),
-                "total": st.column_config.NumberColumn("Total ($)", width=130, format="$%d"),
+                "promedio_diario": st.column_config.NumberColumn("Promedio/Día ($)", width=150, format="$%d"),
             }
         )
         
-        # Gráfico comparativo
-        st.subheader("Comparativa Gráfica")
+        # Gráfico 1: Cantidad Diaria
+        st.subheader("Cantidad Diaria: Newton vs Newton Plus")
         
-        df_newton_pivot = df_newton.pivot_table(
-            index='fecha', columns='tipo', values='total', aggfunc='sum', fill_value=0
+        df_newton_cantidad = df_newton.pivot_table(
+            index='fecha', columns='tipo', values='cantidad', aggfunc='sum', fill_value=0
         )
         
-        fig = go.Figure()
-        for col in df_newton_pivot.columns:
-            fig.add_trace(go.Scatter(
-                x=df_newton_pivot.index,
-                y=df_newton_pivot[col],
+        fig_cantidad = go.Figure()
+        for col in df_newton_cantidad.columns:
+            fig_cantidad.add_trace(go.Bar(
+                x=df_newton_cantidad.index,
+                y=df_newton_cantidad[col],
                 name=col,
-                mode='lines+markers'
+                opacity=0.7
             ))
         
-        fig.update_layout(
-            title="Ingresos Diarios: Newton vs Newton Plus",
+        fig_cantidad.update_layout(
+            title="Cantidad de Facturas Diarias",
             xaxis_title="Fecha",
-            yaxis_title="Total ($)",
+            yaxis_title="Cantidad",
+            hovermode='x unified',
+            height=400,
+            barmode='group'
+        )
+        st.plotly_chart(fig_cantidad, use_container_width=True)
+        
+        # Gráfico 2: Promedio Diario
+        st.subheader("Promedio Diario: Newton vs Newton Plus")
+        
+        df_newton_promedio = df_newton.pivot_table(
+            index='fecha', columns='tipo', values='promedio_diario', aggfunc='first', fill_value=0
+        )
+        
+        fig_promedio = go.Figure()
+        for col in df_newton_promedio.columns:
+            fig_promedio.add_trace(go.Scatter(
+                x=df_newton_promedio.index,
+                y=df_newton_promedio[col],
+                name=col,
+                mode='lines+markers',
+                line=dict(width=2)
+            ))
+        
+        fig_promedio.update_layout(
+            title="Promedio de Factura Diario ($)",
+            xaxis_title="Fecha",
+            yaxis_title="Promedio ($)",
             hovermode='x unified',
             height=400
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig_promedio, use_container_width=True)
     else:
-        st.info("ℹ️ Sin datos Newton/Newton Plus")
+        st.info("ℹ️ Sin datos Newton/Newton Plus en este rango")
 
 # ============================================================
 # TAB 4: ANÁLISIS DE CATEGORÍAS
@@ -350,4 +400,4 @@ with tab4:
 # PIE
 # ============================================================
 st.divider()
-st.caption(f"✅ Dashboard v2.0 | {datetime.now().strftime('%d/%m/%Y %H:%M')} | Año: {ano_seleccionado}")
+st.caption(f"✅ Dashboard v2.1 | {datetime.now().strftime('%d/%m/%Y %H:%M')} | Año: {ano_seleccionado}")
