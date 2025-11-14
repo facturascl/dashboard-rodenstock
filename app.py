@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import sqlite3
 from datetime import datetime
 
@@ -36,7 +37,9 @@ try:
     anos_df = pd.read_sql_query(anos_query, conn)
     anos_disponibles = sorted(anos_df['ano'].tolist(), reverse=True) if not anos_df.empty else [2025]
     
-    ano_seleccionado = st.sidebar.selectbox("📅 Año para Comparar", anos_disponibles, key="ano_select")
+    # Selectores de años para comparar
+    ano1 = st.sidebar.selectbox("📅 Año 1", anos_disponibles, index=0, key="ano1")
+    ano2 = st.sidebar.selectbox("📅 Año 2 (Comparar)", anos_disponibles, index=min(1, len(anos_disponibles)-1), key="ano2")
     
 except Exception as e:
     st.error(f"Error al cargar años: {e}")
@@ -67,7 +70,7 @@ def get_subcategorias_completo(ano):
     """Todas las subcategorías: cantidad, costo, promedio, porcentaje"""
     query = f"""
     WITH stats_totales AS (
-        SELECT CAST(SUM(CASE WHEN lf.linea_numero = 1 THEN f.subtotal + f.iva ELSE 0 END) AS INTEGER) as total_general
+        SELECT CAST(SUM(f.subtotal + f.iva) AS INTEGER) as total_general
         FROM lineas_factura lf
         INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
         WHERE CAST(STRFTIME('%Y', f.fechaemision) AS INTEGER) = {int(ano)}
@@ -76,9 +79,9 @@ def get_subcategorias_completo(ano):
     SELECT 
         COALESCE(lf.clasificacion_subcategoria, 'Sin clasificación') as subcategoria,
         COUNT(DISTINCT lf.numerofactura) as cantidad,
-        CAST(SUM(CASE WHEN lf.linea_numero = 1 THEN f.subtotal + f.iva ELSE 0 END) AS INTEGER) as costo,
-        CAST(AVG(CASE WHEN lf.linea_numero = 1 THEN f.subtotal + f.iva ELSE 0 END) AS INTEGER) as promedio,
-        CAST(100.0 * SUM(CASE WHEN lf.linea_numero = 1 THEN f.subtotal + f.iva ELSE 0 END) / NULLIF((SELECT total_general FROM stats_totales), 0) AS DECIMAL(5,2)) as pct
+        CAST(SUM(f.subtotal + f.iva) AS INTEGER) as costo,
+        CAST(SUM(f.subtotal + f.iva) / NULLIF(COUNT(DISTINCT lf.numerofactura), 0) AS INTEGER) as promedio,
+        CAST(100.0 * SUM(f.subtotal + f.iva) / NULLIF((SELECT total_general FROM stats_totales), 0) AS DECIMAL(5,2)) as pct
     FROM lineas_factura lf
     INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
     WHERE CAST(STRFTIME('%Y', f.fechaemision) AS INTEGER) = {int(ano)}
@@ -96,7 +99,7 @@ def get_newton_rango(fecha_inicio, fecha_fin):
         STRFTIME('%Y-%m-%d', f.fechaemision) as fecha,
         CASE WHEN lf.clasificacion_categoria = 'Newton' THEN 'Newton' ELSE 'Newton Plus' END as tipo,
         COUNT(DISTINCT lf.numerofactura) as cantidad,
-        CAST(AVG(f.subtotal + f.iva) AS INTEGER) as promedio_diario
+        CAST(SUM(f.subtotal + f.iva) / NULLIF(COUNT(DISTINCT lf.numerofactura), 0) AS INTEGER) as promedio_unitario
     FROM lineas_factura lf
     INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
     WHERE f.fechaemision BETWEEN '{fecha_inicio}' AND '{fecha_fin}'
@@ -108,24 +111,8 @@ def get_newton_rango(fecha_inicio, fecha_fin):
     return pd.read_sql_query(query, conn)
 
 @st.cache_data(ttl=300)
-def get_fechas_disponibles(ano):
-    """Obtener primer y último día con datos del año"""
-    query = f"""
-    SELECT 
-        MIN(STRFTIME('%Y-%m-%d', fechaemision)) as fecha_min,
-        MAX(STRFTIME('%Y-%m-%d', fechaemision)) as fecha_max
-    FROM facturas
-    WHERE CAST(STRFTIME('%Y', fechaemision) AS INTEGER) = {int(ano)}
-    AND lf.clasificacion_categoria IN ('Newton', 'Newton Plus')
-    """
-    result = pd.read_sql_query(query, conn)
-    if not result.empty and result['fecha_min'].iloc[0]:
-        return result['fecha_min'].iloc[0], result['fecha_max'].iloc[0]
-    return None, None
-
-@st.cache_data(ttl=300)
-def get_analisis_categorias(ano):
-    """Análisis por categoría principal"""
+def get_analisis_subcategorias(ano):
+    """Análisis COMPLETO por subcategoría"""
     query = f"""
     WITH stats_totales AS (
         SELECT CAST(SUM(f.subtotal + f.iva) AS INTEGER) as total_general
@@ -134,15 +121,16 @@ def get_analisis_categorias(ano):
         AND f.fechaemision IS NOT NULL
     )
     SELECT 
-        COALESCE(lf.clasificacion_categoria, 'Sin categoría') as categoria,
+        COALESCE(lf.clasificacion_subcategoria, 'Sin clasificación') as subcategoria,
         COUNT(DISTINCT lf.numerofactura) as cantidad,
         CAST(SUM(f.subtotal + f.iva) AS INTEGER) as total,
+        CAST(SUM(f.subtotal + f.iva) / NULLIF(COUNT(DISTINCT lf.numerofactura), 0) AS INTEGER) as promedio,
         CAST(100.0 * SUM(f.subtotal + f.iva) / NULLIF((SELECT total_general FROM stats_totales), 0) AS DECIMAL(5,2)) as pct
     FROM lineas_factura lf
     INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
     WHERE CAST(STRFTIME('%Y', f.fechaemision) AS INTEGER) = {int(ano)}
     AND f.fechaemision IS NOT NULL
-    GROUP BY categoria
+    GROUP BY subcategoria
     ORDER BY total DESC
     """
     return pd.read_sql_query(query, conn)
@@ -155,93 +143,151 @@ tab1, tab2, tab3, tab4 = st.tabs([
     "📊 Comparativa Anual",
     "🏷️ Desglose Subcategorías",
     "📈 Newton vs Plus",
-    "📍 Análisis Categorías"
+    "📍 Análisis Subcategorías"
 ])
 
 # ============================================================
 # TAB 1: COMPARATIVA ANUAL (12 MESES)
 # ============================================================
 with tab1:
-    st.header(f"📊 Comparativa Año {ano_seleccionado} - 12 Meses")
+    st.header(f"📊 Comparativa de Años")
     
-    df_comp = get_comparativa_12_meses(ano_seleccionado)
+    meses_nombres = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
     
-    if not df_comp.empty:
-        # Rellenar meses faltantes
-        df_comp_full = pd.DataFrame({'mes': range(1, 13)})
-        df_comp_full = df_comp_full.merge(df_comp, on='mes', how='left').fillna(0)
-        df_comp_full['cantidad_facturas'] = df_comp_full['cantidad_facturas'].astype(int)
-        df_comp_full['total_dinero'] = df_comp_full['total_dinero'].astype(int)
+    df_comp1 = get_comparativa_12_meses(ano1)
+    df_comp2 = get_comparativa_12_meses(ano2) if ano1 != ano2 else pd.DataFrame()
+    
+    # Rellenar meses faltantes
+    df_comp1_full = pd.DataFrame({'mes': range(1, 13)})
+    df_comp1_full = df_comp1_full.merge(df_comp1, on='mes', how='left').fillna(0)
+    df_comp1_full['cantidad_facturas'] = df_comp1_full['cantidad_facturas'].astype(int)
+    df_comp1_full['total_dinero'] = df_comp1_full['total_dinero'].astype(int)
+    df_comp1_full['promedio'] = (df_comp1_full['total_dinero'] / df_comp1_full['cantidad_facturas'].replace(0, 1)).fillna(0).astype(int)
+    
+    if not df_comp2.empty:
+        df_comp2_full = pd.DataFrame({'mes': range(1, 13)})
+        df_comp2_full = df_comp2_full.merge(df_comp2, on='mes', how='left').fillna(0)
+        df_comp2_full['cantidad_facturas'] = df_comp2_full['cantidad_facturas'].astype(int)
+        df_comp2_full['total_dinero'] = df_comp2_full['total_dinero'].astype(int)
+        df_comp2_full['promedio'] = (df_comp2_full['total_dinero'] / df_comp2_full['cantidad_facturas'].replace(0, 1)).fillna(0).astype(int)
+    
+    # Gráfico 1: Año 1
+    st.subheader(f"Año {ano1}: Facturas por Mes")
+    fig1 = go.Figure()
+    
+    fig1.add_trace(go.Bar(
+        x=[meses_nombres[i-1] for i in df_comp1_full['mes']],
+        y=df_comp1_full['cantidad_facturas'],
+        name='Cantidad de Facturas',
+        yaxis='y1',
+        marker=dict(color='rgba(0, 118, 168, 0.7)')
+    ))
+    
+    fig1.add_trace(go.Scatter(
+        x=[meses_nombres[i-1] for i in df_comp1_full['mes']],
+        y=df_comp1_full['total_dinero'],
+        name='Total en Dinero ($)',
+        yaxis='y2',
+        mode='lines+markers',
+        line=dict(color='#FF6B6B', width=3),
+        marker=dict(size=10)
+    ))
+    
+    fig1.update_layout(
+        xaxis_title="Mes",
+        yaxis=dict(title="Cantidad de Facturas", side='left'),
+        yaxis2=dict(title="Total ($)", overlaying='y', side='right'),
+        hovermode='x unified',
+        height=400,
+        showlegend=True
+    )
+    
+    st.plotly_chart(fig1, use_container_width=True)
+    
+    # Tabla 1
+    tabla1 = df_comp1_full.copy()
+    tabla1['mes_nombre'] = [meses_nombres[i-1] for i in tabla1['mes']]
+    st.dataframe(
+        tabla1[['mes_nombre', 'cantidad_facturas', 'total_dinero', 'promedio']],
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "mes_nombre": st.column_config.TextColumn("Mes", width=80),
+            "cantidad_facturas": st.column_config.NumberColumn("Facturas", width=100),
+            "total_dinero": st.column_config.NumberColumn("Total ($)", width=130, format="$%d"),
+            "promedio": st.column_config.NumberColumn("Promedio/Factura ($)", width=150, format="$%d"),
+        }
+    )
+    
+    # Gráfico 2: Año 2 (si es diferente)
+    if ano1 != ano2 and not df_comp2.empty:
+        st.divider()
+        st.subheader(f"Año {ano2}: Facturas por Mes")
+        fig2 = go.Figure()
         
-        meses_nombres = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
-        
-        # Gráfico
-        fig = go.Figure()
-        
-        fig.add_trace(go.Bar(
-            x=[meses_nombres[i-1] for i in df_comp_full['mes']],
-            y=df_comp_full['cantidad_facturas'],
+        fig2.add_trace(go.Bar(
+            x=[meses_nombres[i-1] for i in df_comp2_full['mes']],
+            y=df_comp2_full['cantidad_facturas'],
             name='Cantidad de Facturas',
             yaxis='y1',
-            marker=dict(color='rgba(0, 118, 168, 0.7)')
+            marker=dict(color='rgba(76, 175, 80, 0.7)')
         ))
         
-        fig.add_trace(go.Scatter(
-            x=[meses_nombres[i-1] for i in df_comp_full['mes']],
-            y=df_comp_full['total_dinero'],
+        fig2.add_trace(go.Scatter(
+            x=[meses_nombres[i-1] for i in df_comp2_full['mes']],
+            y=df_comp2_full['total_dinero'],
             name='Total en Dinero ($)',
             yaxis='y2',
             mode='lines+markers',
-            line=dict(color='#FF6B6B', width=3),
+            line=dict(color='#FFC107', width=3),
             marker=dict(size=10)
         ))
         
-        fig.update_layout(
-            title=f"Comparativa {ano_seleccionado}: Facturas por Mes y Total en Dinero",
+        fig2.update_layout(
             xaxis_title="Mes",
             yaxis=dict(title="Cantidad de Facturas", side='left'),
             yaxis2=dict(title="Total ($)", overlaying='y', side='right'),
             hovermode='x unified',
-            height=500,
+            height=400,
             showlegend=True
         )
         
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig2, use_container_width=True)
         
-        # Tabla
-        st.subheader("Datos Mensuales")
-        tabla_display = df_comp_full.copy()
-        tabla_display['mes_nombre'] = [meses_nombres[i-1] for i in tabla_display['mes']]
+        # Tabla 2
+        tabla2 = df_comp2_full.copy()
+        tabla2['mes_nombre'] = [meses_nombres[i-1] for i in tabla2['mes']]
         st.dataframe(
-            tabla_display[['mes_nombre', 'cantidad_facturas', 'total_dinero']],
+            tabla2[['mes_nombre', 'cantidad_facturas', 'total_dinero', 'promedio']],
             use_container_width=True,
             hide_index=True,
             column_config={
-                "mes_nombre": st.column_config.TextColumn("Mes", width=100),
-                "cantidad_facturas": st.column_config.NumberColumn("Facturas", width=120),
-                "total_dinero": st.column_config.NumberColumn("Total ($)", width=150, format="$%d"),
+                "mes_nombre": st.column_config.TextColumn("Mes", width=80),
+                "cantidad_facturas": st.column_config.NumberColumn("Facturas", width=100),
+                "total_dinero": st.column_config.NumberColumn("Total ($)", width=130, format="$%d"),
+                "promedio": st.column_config.NumberColumn("Promedio/Factura ($)", width=150, format="$%d"),
             }
         )
-    else:
-        st.info("ℹ️ Sin datos para este año")
 
 # ============================================================
 # TAB 2: DESGLOSE SUBCATEGORÍAS
 # ============================================================
 with tab2:
-    st.header(f"🏷️ Desglose Subcategorías - {ano_seleccionado}")
+    st.header(f"🏷️ Desglose Subcategorías - Año {ano1}")
     
-    df_subcat = get_subcategorias_completo(ano_seleccionado)
+    df_subcat = get_subcategorias_completo(ano1)
     
     if not df_subcat.empty:
         # Métricas
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
             st.metric("Total Subcategorías", len(df_subcat))
         with col2:
             st.metric("Ingresos Totales", f"${df_subcat['costo'].sum():,.0f}")
         with col3:
-            st.metric("Promedio", f"${df_subcat['promedio'].mean():,.0f}")
+            st.metric("Cantidad Total", f"{df_subcat['cantidad'].sum()}")
+        with col4:
+            st.metric("Promedio General", f"${int(df_subcat['costo'].sum() / df_subcat['cantidad'].sum()):,.0f}")
         
         st.divider()
         
@@ -252,152 +298,151 @@ with tab2:
             use_container_width=True,
             hide_index=True,
             column_config={
-                "subcategoria": st.column_config.TextColumn("Subcategoría", width=250),
+                "subcategoria": st.column_config.TextColumn("Subcategoría", width=200),
                 "cantidad": st.column_config.NumberColumn("Cantidad", width=100),
-                "costo": st.column_config.NumberColumn("Costo", width=130, format="$%d"),
-                "promedio": st.column_config.NumberColumn("Promedio", width=130, format="$%d"),
+                "costo": st.column_config.NumberColumn("Total ($)", width=130, format="$%d"),
+                "promedio": st.column_config.NumberColumn("Promedio ($)", width=130, format="$%d"),
                 "pct": st.column_config.NumberColumn("% Total", width=100, format="%.2f%%"),
             }
         )
         
         # Gráfico
-        st.subheader("Distribución")
+        st.subheader("Distribución por Subcategoría")
         fig_pie = go.Figure(data=[go.Pie(
             labels=df_subcat['subcategoria'],
             values=df_subcat['costo'],
             textposition='inside',
-            hovertemplate='<b>%{label}</b><br>$%{value:,.0f}<extra></extra>'
+            hovertemplate='<b>%{label}</b><br>$%{value:,.0f}<br>%{percent}<extra></extra>'
         )])
         st.plotly_chart(fig_pie, use_container_width=True)
     else:
         st.info("ℹ️ Sin datos de subcategorías")
 
 # ============================================================
-# TAB 3: NEWTON VS NEWTON PLUS (DÍA A DÍA + RANGO)
+# TAB 3: NEWTON VS NEWTON PLUS
 # ============================================================
 with tab3:
-    st.header(f"📈 Newton vs Newton Plus - Análisis por Día {ano_seleccionado}")
+    st.header(f"📈 Newton vs Newton Plus")
     
     # Selector de rango de fechas
     col1, col2 = st.columns(2)
     with col1:
-        fecha_inicio = st.date_input("📅 Fecha Inicio", value=pd.to_datetime(f"{ano_seleccionado}-01-01"))
+        fecha_inicio = st.date_input("📅 Fecha Inicio", value=pd.to_datetime(f"{ano1}-01-01"), key="newton_inicio")
     with col2:
-        fecha_fin = st.date_input("📅 Fecha Fin", value=pd.to_datetime(f"{ano_seleccionado}-12-31"))
+        fecha_fin = st.date_input("📅 Fecha Fin", value=pd.to_datetime(f"{ano1}-12-31"), key="newton_fin")
     
     df_newton = get_newton_rango(fecha_inicio.strftime('%Y-%m-%d'), fecha_fin.strftime('%Y-%m-%d'))
     
     if not df_newton.empty:
-        # Tabla: Cantidad + Promedio Diario
-        st.subheader("Detalle Diario: Cantidad y Promedio")
-        st.dataframe(
-            df_newton,
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "fecha": st.column_config.TextColumn("Fecha", width=120),
-                "tipo": st.column_config.TextColumn("Tipo", width=100),
-                "cantidad": st.column_config.NumberColumn("Cantidad", width=100),
-                "promedio_diario": st.column_config.NumberColumn("Promedio/Día ($)", width=150, format="$%d"),
-            }
-        )
-        
-        # Gráfico 1: Cantidad Diaria
-        st.subheader("Cantidad Diaria: Newton vs Newton Plus")
-        
-        df_newton_cantidad = df_newton.pivot_table(
+        # Gráfico COMBINADO
+        df_newton_pivot_cant = df_newton.pivot_table(
             index='fecha', columns='tipo', values='cantidad', aggfunc='sum', fill_value=0
         )
+        df_newton_pivot_prom = df_newton.pivot_table(
+            index='fecha', columns='tipo', values='promedio_unitario', aggfunc='first', fill_value=0
+        )
         
-        fig_cantidad = go.Figure()
-        for col in df_newton_cantidad.columns:
-            fig_cantidad.add_trace(go.Bar(
-                x=df_newton_cantidad.index,
-                y=df_newton_cantidad[col],
-                name=col,
-                opacity=0.7
-            ))
+        fig = make_subplots(
+            rows=2, cols=1,
+            subplot_titles=("Cantidad Diaria", "Promedio Unitario Diario"),
+            vertical_spacing=0.12,
+            row_heights=[0.5, 0.5]
+        )
         
-        fig_cantidad.update_layout(
-            title="Cantidad de Facturas Diarias",
-            xaxis_title="Fecha",
-            yaxis_title="Cantidad",
+        # Gráfico 1: Cantidad
+        for col in df_newton_pivot_cant.columns:
+            fig.add_trace(
+                go.Bar(
+                    x=df_newton_pivot_cant.index,
+                    y=df_newton_pivot_cant[col],
+                    name=f"{col}",
+                    opacity=0.7
+                ),
+                row=1, col=1
+            )
+        
+        # Gráfico 2: Promedio
+        for col in df_newton_pivot_prom.columns:
+            fig.add_trace(
+                go.Scatter(
+                    x=df_newton_pivot_prom.index,
+                    y=df_newton_pivot_prom[col],
+                    name=f"Prom {col}",
+                    mode='lines+markers',
+                    line=dict(width=2),
+                    showlegend=True
+                ),
+                row=2, col=1
+            )
+        
+        fig.update_yaxes(title_text="Cantidad", row=1, col=1)
+        fig.update_yaxes(title_text="Promedio ($)", row=2, col=1)
+        fig.update_xaxes(title_text="Fecha", row=2, col=1)
+        
+        fig.update_layout(
+            height=600,
             hovermode='x unified',
-            height=400,
-            barmode='group'
+            showlegend=True
         )
-        st.plotly_chart(fig_cantidad, use_container_width=True)
-        
-        # Gráfico 2: Promedio Diario
-        st.subheader("Promedio Diario: Newton vs Newton Plus")
-        
-        df_newton_promedio = df_newton.pivot_table(
-            index='fecha', columns='tipo', values='promedio_diario', aggfunc='first', fill_value=0
-        )
-        
-        fig_promedio = go.Figure()
-        for col in df_newton_promedio.columns:
-            fig_promedio.add_trace(go.Scatter(
-                x=df_newton_promedio.index,
-                y=df_newton_promedio[col],
-                name=col,
-                mode='lines+markers',
-                line=dict(width=2)
-            ))
-        
-        fig_promedio.update_layout(
-            title="Promedio de Factura Diario ($)",
-            xaxis_title="Fecha",
-            yaxis_title="Promedio ($)",
-            hovermode='x unified',
-            height=400
-        )
-        st.plotly_chart(fig_promedio, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True)
     else:
         st.info("ℹ️ Sin datos Newton/Newton Plus en este rango")
 
 # ============================================================
-# TAB 4: ANÁLISIS DE CATEGORÍAS
+# TAB 4: ANÁLISIS POR SUBCATEGORÍA
 # ============================================================
 with tab4:
-    st.header(f"📍 Análisis por Categoría - {ano_seleccionado}")
+    st.header(f"📍 Análisis Completo por Subcategoría - Año {ano1}")
     
-    df_cat = get_analisis_categorias(ano_seleccionado)
+    df_subcat_full = get_analisis_subcategorias(ano1)
     
-    if not df_cat.empty:
-        # Tabla
+    if not df_subcat_full.empty:
+        # Métricas
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Total Subcategorías", len(df_subcat_full))
+        with col2:
+            st.metric("Ingresos Totales", f"${df_subcat_full['total'].sum():,.0f}")
+        with col3:
+            st.metric("Total Trabajos", f"{df_subcat_full['cantidad'].sum()}")
+        
+        st.divider()
+        
+        # Tabla COMPLETA
+        st.subheader("Cantidad | Total | Promedio | Porcentaje")
         st.dataframe(
-            df_cat,
+            df_subcat_full,
             use_container_width=True,
             hide_index=True,
             column_config={
-                "categoria": st.column_config.TextColumn("Categoría", width=250),
-                "cantidad": st.column_config.NumberColumn("Cantidad", width=100),
-                "total": st.column_config.NumberColumn("Total ($)", width=130, format="$%d"),
-                "pct": st.column_config.NumberColumn("% Total", width=100, format="%.2f%%"),
+                "subcategoria": st.column_config.TextColumn("Subcategoría", width=220),
+                "cantidad": st.column_config.NumberColumn("Cantidad de Trabajos", width=130),
+                "total": st.column_config.NumberColumn("Total ($)", width=140, format="$%d"),
+                "promedio": st.column_config.NumberColumn("Promedio ($)", width=140, format="$%d"),
+                "pct": st.column_config.NumberColumn("% Total", width=110, format="%.2f%%"),
             }
         )
         
         # Gráfico
+        st.subheader("Distribución")
         fig = go.Figure(data=[go.Bar(
-            x=df_cat['categoria'],
-            y=df_cat['total'],
-            text=df_cat['pct'].apply(lambda x: f"{x:.1f}%"),
+            x=df_subcat_full['subcategoria'],
+            y=df_subcat_full['total'],
+            text=[f"{p:.1f}%" for p in df_subcat_full['pct']],
             textposition='outside',
-            marker=dict(color=df_cat['total'], colorscale='Viridis')
+            marker=dict(color=df_subcat_full['total'], colorscale='Viridis')
         )])
         fig.update_layout(
-            title="Total por Categoría",
-            xaxis_title="Categoría",
+            xaxis_title="Subcategoría",
             yaxis_title="Total ($)",
             height=400
         )
         st.plotly_chart(fig, use_container_width=True)
     else:
-        st.info("ℹ️ Sin datos de categorías")
+        st.info("ℹ️ Sin datos")
 
 # ============================================================
 # PIE
 # ============================================================
 st.divider()
-st.caption(f"✅ Dashboard v2.1 | {datetime.now().strftime('%d/%m/%Y %H:%M')} | Año: {ano_seleccionado}")
+st.caption(f"✅ Dashboard v3.0 | {datetime.now().strftime('%d/%m/%Y %H:%M')} | Año {ano1} vs {ano2}")
