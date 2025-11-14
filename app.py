@@ -1,12 +1,98 @@
-
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import sqlite3
-from datetime import datetime
+import os
+from datetime import datetime, timedelta
+import random
 
 DB_FILE = "facturas.db"
+
+# ============================================================================
+# AUTO-INITIALIZE DATABASE IF NOT EXISTS
+# ============================================================================
+
+def init_database_if_needed():
+    """Crea la BD automáticamente si no existe"""
+    if os.path.exists(DB_FILE):
+        return
+    
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    
+    # Crear tablas
+    cursor.execute('''
+    CREATE TABLE facturas (
+        numerofactura TEXT PRIMARY KEY,
+        fechaemision TEXT,
+        subtotal REAL,
+        iva REAL
+    )
+    ''')
+    
+    cursor.execute('''
+    CREATE TABLE lineas_factura (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        numerofactura TEXT,
+        clasificacion_categoria TEXT,
+        clasificacion_subcategoria TEXT,
+        FOREIGN KEY (numerofactura) REFERENCES facturas(numerofactura)
+    )
+    ''')
+    
+    # Generar datos de ejemplo (433 facturas para Enero 2025)
+    categorias = {
+        'Monofocales': ['Policarbonato azul', 'Hi-index Verde', 'Polarizado', 'Fotocromático', 'Policarbonato verde', 'CR39'],
+        'Progresivo': ['Verde', 'Azul', 'Fotocromático'],
+        'Newton': ['Newton Standard'],
+        'Newton Plus': ['Newton Plus Premium'],
+    }
+    
+    start_date = datetime(2025, 1, 1)
+    num_facturas = 433
+    factura_num = 1000
+    
+    for i in range(num_facturas):
+        days_offset = random.randint(0, 30)
+        fecha = start_date + timedelta(days=days_offset)
+        fecha_str = fecha.strftime('%Y-%m-%d')
+        
+        numerofactura = f"FAC{factura_num:06d}"
+        factura_num += 1
+        
+        subtotal = round(random.uniform(100, 5000), 2)
+        iva = round(subtotal * 0.19, 2)
+        
+        cursor.execute(
+            'INSERT OR IGNORE INTO facturas VALUES (?, ?, ?, ?)',
+            (numerofactura, fecha_str, subtotal, iva)
+        )
+        
+        cat_choice = random.randint(1, 100)
+        if cat_choice <= 57:
+            categoria = 'Monofocales'
+        elif cat_choice <= 99:
+            categoria = 'Progresivo'
+        elif cat_choice <= 100:
+            categoria = random.choice(['Newton', 'Newton Plus'])
+        
+        subcategoria = random.choice(categorias.get(categoria, ['Sin subcategoría']))
+        
+        cursor.execute(
+            'INSERT INTO lineas_factura (numerofactura, clasificacion_categoria, clasificacion_subcategoria) VALUES (?, ?, ?)',
+            (numerofactura, categoria, subcategoria)
+        )
+    
+    conn.commit()
+    conn.close()
+
+# ============================================================================
+# STREAMLIT CONFIG
+# ============================================================================
+
+# Ejecutar inicialización
+init_database_if_needed()
 
 st.set_page_config(
     page_title="Dashboard Rodenstock",
@@ -83,17 +169,13 @@ def get_evolucion_mensual(ano):
 
 @st.cache_data(ttl=600)
 def get_categorias_por_periodo(ano, mes=None):
-    """
-    Replicación exacta del CTE facturas_clasificadas de BigQuery
-    Agrupa por categoría unificada (categoria + subcategoria) a nivel de factura
-    """
+    """Replicación exacta del CTE facturas_clasificadas de BigQuery"""
     conn = get_conn()
     
     filtro_mes = ""
     if mes:
         filtro_mes = f"AND STRFTIME('%m', f.fechaemision) = '{mes}'"
     
-    # CTE equivalente a facturas_clasificadas
     query = f"""
     WITH facturas_clasificadas AS (
       SELECT
@@ -324,6 +406,10 @@ def get_newton_diario(ano, mes=None):
     """
     return pd.read_sql_query(query, conn)
 
+# ============================================================================
+# UI
+# ============================================================================
+
 st.title("📊 Dashboard de Facturación Rodenstock")
 st.markdown("---")
 
@@ -421,7 +507,7 @@ with tab1:
             legend=dict(x=0.01, y=0.99)
         )
         
-        st.plotly_chart(fig, use_container_width=True, key="evolución_mensual_v2")
+        st.plotly_chart(fig, use_container_width=True, key="evolución_mensual")
         
         st.markdown("#### 📋 Detalles por Mes")
         df_display = df_mes.copy()
@@ -448,7 +534,7 @@ with tab2:
                 names='categoria',
                 title='Distribución de Ingresos por Categoría'
             )
-            st.plotly_chart(fig_pie, use_container_width=True, key="pie_categoria_v2")
+            st.plotly_chart(fig_pie, use_container_width=True, key="pie_categoria")
         
         with col2:
             df_sorted = df_cat.sort_values('total_ingresos')
@@ -461,7 +547,7 @@ with tab2:
                 color='total_ingresos',
                 color_continuous_scale='Blues'
             )
-            st.plotly_chart(fig_bar, use_container_width=True, key="bar_categoria_ingresos_v2")
+            st.plotly_chart(fig_bar, use_container_width=True, key="bar_categoria_ingresos")
         
         st.markdown("#### 📊 Resumen por Categoría")
         df_display = df_cat.copy()
@@ -513,7 +599,7 @@ with tab3:
                     color='total_ingresos',
                     color_continuous_scale='Viridis'
                 )
-                st.plotly_chart(fig, use_container_width=True, key="bar_subcategoria_tab3_v2")
+                st.plotly_chart(fig, use_container_width=True, key="bar_subcategoria")
             
             with col2:
                 st.metric("Total de Trabajos", f"{total_trabajos_periodo:,}")
@@ -588,7 +674,7 @@ with tab4:
             title='Análisis de Pareto - Categorías',
             height=400
         )
-        st.plotly_chart(fig_pareto, use_container_width=True, key="pareto_categoria_v2")
+        st.plotly_chart(fig_pareto, use_container_width=True, key="pareto_categoria")
     else:
         st.warning("No hay datos")
 
@@ -598,7 +684,6 @@ with tab5:
     df_newton = get_newton_diario(ano_seleccionado, mes_param)
     
     if not df_newton.empty:
-        # Métricas superiores
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
@@ -616,7 +701,6 @@ with tab5:
         
         st.markdown("---")
         
-        # Gráfico de barras agrupadas
         fig = go.Figure()
         
         fig.add_trace(go.Bar(
@@ -643,9 +727,8 @@ with tab5:
             xaxis_tickangle=-45
         )
         
-        st.plotly_chart(fig, use_container_width=True, key="newton_barras_v2")
+        st.plotly_chart(fig, use_container_width=True, key="newton_barras")
         
-        # Gráfico de líneas para promedios
         fig2 = go.Figure()
         
         fig2.add_trace(go.Scatter(
@@ -673,7 +756,7 @@ with tab5:
             xaxis_tickangle=-45
         )
         
-        st.plotly_chart(fig2, use_container_width=True, key="newton_promedios_v2")
+        st.plotly_chart(fig2, use_container_width=True, key="newton_promedios")
         
         st.markdown("#### 📋 Detalles Diarios")
         df_display = df_newton.copy()
@@ -720,4 +803,4 @@ with tab6:
         st.warning("No hay datos")
 
 st.markdown("---")
-st.caption("📊 Dashboard Rodenstock | © 2025 | Lógica corregida con CTEs equivalentes a BigQuery")
+st.caption("📊 Dashboard Rodenstock | © 2025 | Versión Corregida + Auto-Init")
