@@ -212,25 +212,46 @@ with tab1:
 with tab2:
     st.subheader("🏷️ Análisis por Categoría y Subcategoría (SIN MEZCLA)")
     
-    ano_sel = st.selectbox("📅 Año", options=anos_list, key="ano_tab2")
+    col1, col2 = st.columns(2)
+    with col1:
+        ano_sel = st.selectbox("📅 Año", options=anos_list, key="ano_tab2")
+    with col2:
+        mes_sel_tab2 = st.selectbox("📅 Mes", options=["Todos"] + [f"{i:02d}" for i in range(1, 13)], key="mes_tab2")
     
     try:
         conn = get_db_connection()
         
-        query = f"""
-        SELECT 
-            lf.linea_numero,
-            COALESCE(lf.clasificacion_categoria, 'Sin categoría') as categoria,
-            COALESCE(lf.clasificacion_subcategoria, 'Sin subcategoría') as subcategoria,
-            COUNT(DISTINCT f.numerofactura) as cantidad_trabajos,
-            SUM(COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0)) as total_subcategoria
-        FROM lineas_factura lf
-        INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
-        WHERE SUBSTR(f.fechaemision, 1, 4) = '{ano_sel}' 
-          AND f.fechaemision IS NOT NULL
-        GROUP BY lf.linea_numero, categoria, subcategoria
-        ORDER BY total_subcategoria DESC
-        """
+        if mes_sel_tab2 == "Todos":
+            query = f"""
+            SELECT 
+                lf.linea_numero,
+                COALESCE(lf.clasificacion_categoria, 'Sin categoría') as categoria,
+                COALESCE(lf.clasificacion_subcategoria, 'Sin subcategoría') as subcategoria,
+                COUNT(DISTINCT f.numerofactura) as cantidad_trabajos,
+                SUM(COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0)) as total_subcategoria
+            FROM lineas_factura lf
+            INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
+            WHERE SUBSTR(f.fechaemision, 1, 4) = '{ano_sel}' 
+              AND f.fechaemision IS NOT NULL
+            GROUP BY lf.linea_numero, categoria, subcategoria
+            ORDER BY total_subcategoria DESC
+            """
+        else:
+            query = f"""
+            SELECT 
+                lf.linea_numero,
+                COALESCE(lf.clasificacion_categoria, 'Sin categoría') as categoria,
+                COALESCE(lf.clasificacion_subcategoria, 'Sin subcategoría') as subcategoria,
+                COUNT(DISTINCT f.numerofactura) as cantidad_trabajos,
+                SUM(COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0)) as total_subcategoria
+            FROM lineas_factura lf
+            INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
+            WHERE SUBSTR(f.fechaemision, 1, 4) = '{ano_sel}' 
+              AND SUBSTR(f.fechaemision, 6, 2) = '{mes_sel_tab2}'
+              AND f.fechaemision IS NOT NULL
+            GROUP BY lf.linea_numero, categoria, subcategoria
+            ORDER BY total_subcategoria DESC
+            """
         
         df_cat = pd.read_sql_query(query, conn)
         conn.close()
@@ -250,7 +271,7 @@ with tab2:
                 y='categoria_subcategoria',
                 color='categoria',
                 orientation='h',
-                title=f"Total por Categoría/Subcategoría ({ano_sel}) - SIN MEZCLA",
+                title=f"Total por Categoría/Subcategoría ({ano_sel}){' - Mes ' + mes_sel_tab2 if mes_sel_tab2 != 'Todos' else ''}",
                 labels={'total_subcategoria': 'Total ($)', 'categoria_subcategoria': 'Categoría - Subcategoría'},
                 height=700
             )
