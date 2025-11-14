@@ -399,6 +399,5 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
 
 st.markdown("---")
 st.caption("📊 Dashboard Rodenstock | © 2025 | ✓ Datos 100% desde BD SQLite | Valores REALES")
-```
 
 
