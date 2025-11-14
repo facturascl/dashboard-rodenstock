@@ -36,13 +36,23 @@ st.title("📊 Dashboard Rodenstock - Reportes Profesionales")
 # ========== SIDEBAR - FILTROS ==========
 st.sidebar.header("⚙️ Filtros")
 
-conn = get_db_connection()
-query_anos = "SELECT DISTINCT SUBSTR(fechaemision, 1, 4) AS ano FROM facturas WHERE fechaemision IS NOT NULL ORDER BY ano DESC"
-df_anos = pd.read_sql_query(query_anos, conn)
-anos_list = sorted(df_anos['ano'].tolist(), reverse=True) if not df_anos.empty else []
-conn.close()
+try:
+    conn = get_db_connection()
+    query_anos = """
+    SELECT DISTINCT SUBSTR(fechaemision, 1, 4) AS ano 
+    FROM facturas 
+    WHERE fechaemision IS NOT NULL 
+    ORDER BY ano DESC
+    """
+    df_anos = pd.read_sql_query(query_anos, conn)
+    conn.close()
 
-ano_sel = st.sidebar.selectbox("📅 Año", options=anos_list if anos_list else ["2025"])
+    anos_list = sorted(df_anos['ano'].tolist(), reverse=True) if not df_anos.empty else ["2025"]
+except Exception as e:
+    st.sidebar.error(f"Error cargando años: {str(e)}")
+    anos_list = ["2025"]
+
+ano_sel = st.sidebar.selectbox("📅 Año", options=anos_list)
 
 # ========== TABS PRINCIPALES ==========
 tab1, tab2, tab3, tab4 = st.tabs([
@@ -64,14 +74,16 @@ with tab1:
             SUBSTR(f.fechaemision, 1, 7) as mes,
             SUM(CASE WHEN f.tipo = 'factura' THEN 1 ELSE 0 END) as cantidad_facturas,
             SUM(CASE WHEN f.tipo = 'nota_credito' THEN 1 ELSE 0 END) as cantidad_notas,
-            SUM(f.subtotal + f.iva) as total_mes
+            SUM(COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0)) as total_mes
         FROM facturas f
-        WHERE SUBSTR(f.fechaemision, 1, 4) = '{ano_sel}'
+        WHERE SUBSTR(f.fechaemision, 1, 4) = '{ano_sel}' 
+          AND f.fechaemision IS NOT NULL
         GROUP BY mes
         ORDER BY mes
         """
 
         df_mensual = pd.read_sql_query(query, conn)
+        conn.close()
 
         if not df_mensual.empty:
             df_mensual['cantidad_total'] = df_mensual['cantidad_facturas'] + df_mensual['cantidad_notas']
@@ -79,7 +91,6 @@ with tab1:
 
             fig = go.Figure()
 
-            # Barras para facturas
             fig.add_trace(go.Bar(
                 x=df_mensual['mes'], 
                 y=df_mensual['cantidad_facturas'],
@@ -87,7 +98,6 @@ with tab1:
                 marker_color='#667eea'
             ))
 
-            # Barras para notas
             fig.add_trace(go.Bar(
                 x=df_mensual['mes'], 
                 y=df_mensual['cantidad_notas'],
@@ -95,7 +105,6 @@ with tab1:
                 marker_color='#ff6b6b'
             ))
 
-            # Línea para total
             fig.add_trace(go.Scatter(
                 x=df_mensual['mes'],
                 y=df_mensual['total_mes'],
@@ -117,7 +126,6 @@ with tab1:
 
             st.plotly_chart(fig, use_container_width=True)
 
-            # Tabla de resumen
             df_display = df_mensual[['mes', 'cantidad_facturas', 'cantidad_notas', 'cantidad_total', 'total_mes', 'promedio']].copy()
             df_display.columns = ['Mes', 'Facturas', 'Notas', 'Total Items', 'Total ($)', 'Promedio ($)']
             df_display['Total ($)'] = df_display['Total ($)'].apply(lambda x: f"${x:,.2f}")
@@ -127,9 +135,8 @@ with tab1:
         else:
             st.info("Sin datos para este año")
 
-        conn.close()
     except Exception as e:
-        st.error(f"Error: {str(e)}")
+        st.error(f"Error en Tab 1: {str(e)}")
 
 # ==================== TAB 2: POR CATEGORÍA/SUBCATEGORÍA ====================
 with tab2:
@@ -140,29 +147,28 @@ with tab2:
 
         query = f"""
         SELECT 
-            lf.clasificacion_categoria as categoria,
-            lf.clasificacion_subcategoria as subcategoria,
+            COALESCE(lf.clasificacion_categoria, 'Sin categoría') as categoria,
+            COALESCE(lf.clasificacion_subcategoria, 'Sin subcategoría') as subcategoria,
             COUNT(DISTINCT f.numerofactura) as cantidad_trabajos,
-            SUM(f.subtotal + f.iva) as total_subcategoria
+            SUM(COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0)) as total_subcategoria
         FROM lineas_factura lf
         INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
-        WHERE SUBSTR(f.fechaemision, 1, 4) = '{ano_sel}' AND f.fechaemision IS NOT NULL
+        WHERE SUBSTR(f.fechaemision, 1, 4) = '{ano_sel}' 
+          AND f.fechaemision IS NOT NULL
         GROUP BY categoria, subcategoria
         ORDER BY total_subcategoria DESC
         """
 
         df_cat = pd.read_sql_query(query, conn)
+        conn.close()
 
         if not df_cat.empty:
-            # Calcular totales generales
             total_general = df_cat['total_subcategoria'].sum()
             total_trabajos = df_cat['cantidad_trabajos'].sum()
 
-            # Añadir columnas calculadas
             df_cat['promedio'] = df_cat['total_subcategoria'] / df_cat['cantidad_trabajos']
             df_cat['porcentaje'] = (df_cat['total_subcategoria'] / total_general * 100).round(2)
 
-            # Gráfico de barras apiladas
             fig = px.bar(
                 df_cat.sort_values('total_subcategoria', ascending=True),
                 x='total_subcategoria',
@@ -176,7 +182,6 @@ with tab2:
 
             st.plotly_chart(fig, use_container_width=True)
 
-            # Tabla con todos los detalles
             df_display = df_cat[['categoria', 'subcategoria', 'cantidad_trabajos', 'total_subcategoria', 'promedio', 'porcentaje']].copy()
             df_display.columns = ['Categoría', 'Subcategoría', 'Cantidad', 'Total ($)', 'Promedio ($)', '% del Total']
             df_display['Total ($)'] = df_display['Total ($)'].apply(lambda x: f"${x:,.2f}")
@@ -185,7 +190,6 @@ with tab2:
 
             st.dataframe(df_display, use_container_width=True, hide_index=True)
 
-            # Resumen ejecutivo
             col1, col2, col3 = st.columns(3)
             with col1:
                 st.metric("Total de Trabajos", f"{total_trabajos:,}")
@@ -196,9 +200,8 @@ with tab2:
         else:
             st.info("Sin datos para este año")
 
-        conn.close()
     except Exception as e:
-        st.error(f"Error: {str(e)}")
+        st.error(f"Error en Tab 2: {str(e)}")
 
 # ==================== TAB 3: NEWTON vs NEWTON PLUS ====================
 with tab3:
@@ -207,7 +210,6 @@ with tab3:
     try:
         conn = get_db_connection()
 
-        # Primero obtener todos los datos
         query = f"""
         SELECT 
             f.fechaemision as fecha,
@@ -217,7 +219,7 @@ with tab3:
                 ELSE 'Otro'
             END as categoria_producto,
             COUNT(DISTINCT f.numerofactura) as cantidad_trabajos,
-            SUM(f.subtotal + f.iva) as total
+            SUM(COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0)) as total
         FROM lineas_factura lf
         INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
         WHERE SUBSTR(f.fechaemision, 1, 4) = '{ano_sel}' 
@@ -227,13 +229,12 @@ with tab3:
         """
 
         df_newton = pd.read_sql_query(query, conn)
+        conn.close()
 
         if not df_newton.empty:
-            # Filtrar solo Newton y Newton Plus
             df_newton_filtered = df_newton[df_newton['categoria_producto'].isin(['Newton', 'Newton Plus'])]
 
             if not df_newton_filtered.empty:
-                # Pivot para comparación
                 df_pivot = df_newton_filtered.pivot_table(
                     index='fecha',
                     columns='categoria_producto',
@@ -241,7 +242,6 @@ with tab3:
                     fill_value=0
                 )
 
-                # Gráfico de líneas
                 fig = go.Figure()
 
                 if ('cantidad_trabajos', 'Newton') in df_pivot.columns:
@@ -272,7 +272,6 @@ with tab3:
 
                 st.plotly_chart(fig, use_container_width=True)
 
-                # Resumen estadístico
                 summary = df_newton_filtered.groupby('categoria_producto').agg({
                     'cantidad_trabajos': 'sum',
                     'total': 'sum'
@@ -285,7 +284,6 @@ with tab3:
 
                 st.dataframe(summary, use_container_width=True, hide_index=True)
 
-                # Comparativa lado a lado
                 col1, col2 = st.columns(2)
                 with col1:
                     newton_data = df_newton_filtered[df_newton_filtered['categoria_producto'] == 'Newton']
@@ -309,9 +307,8 @@ with tab3:
         else:
             st.info("Sin datos para este año")
 
-        conn.close()
     except Exception as e:
-        st.error(f"Error: {str(e)}")
+        st.error(f"Error en Tab 3: {str(e)}")
 
 # ==================== TAB 4: TABLA DETALLADA ====================
 with tab4:
@@ -325,15 +322,17 @@ with tab4:
             f.numerofactura,
             f.fechaemision,
             f.tipo,
-            f.subtotal,
-            f.iva,
-            f.total
+            COALESCE(f.subtotal, 0) as subtotal,
+            COALESCE(f.iva, 0) as iva,
+            COALESCE(f.total, 0) as total
         FROM facturas f
-        WHERE SUBSTR(f.fechaemision, 1, 4) = '{ano_sel}' AND f.fechaemision IS NOT NULL
+        WHERE SUBSTR(f.fechaemision, 1, 4) = '{ano_sel}' 
+          AND f.fechaemision IS NOT NULL
         ORDER BY f.fechaemision DESC
         """
 
         df = pd.read_sql_query(query, conn)
+        conn.close()
 
         if not df.empty:
             df_display = df.copy()
@@ -346,9 +345,8 @@ with tab4:
         else:
             st.info("Sin datos para este año")
 
-        conn.close()
     except Exception as e:
-        st.error(f"Error: {str(e)}")
+        st.error(f"Error en Tab 4: {str(e)}")
 
 # ========== FOOTER ==========
 st.markdown("---")
