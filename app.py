@@ -11,8 +11,6 @@ page_title="Dashboard Rodenstock Pro",
 page_icon="📊",
 layout="wide"
 )
-
-========== BD ==========
 def find_database():
 possible_paths = ['facturas.db', '/app/facturas.db', '/mount/src/dashboard-rodenstock/facturas.db']
 for path in possible_paths:
@@ -29,10 +27,10 @@ st.stop()
 conn = sqlite3.connect(DB_FILE, check_same_thread=False)
 return conn
 
-========== ENCABEZADO ==========
+
 st.title("📊 Dashboard Rodenstock - Reportes Profesionales")
 
-========== SIDEBAR - FILTROS ==========
+
 st.sidebar.header("⚙️ Filtros")
 
 try:
@@ -52,7 +50,6 @@ except Exception as e:
 st.sidebar.error(f"Error cargando años: {str(e)}")
 anos_list = ["2025"]
 
-========== TABS PRINCIPALES ==========
 tab1, tab2, tab3, tab4 = st.tabs([
 "📈 Análisis Mensual",
 "🏷️ Por Categoría/Subcategoría",
@@ -60,7 +57,6 @@ tab1, tab2, tab3, tab4 = st.tabs([
 "📊 Gráficos Avanzados"
 ])
 
-==================== TAB 1: ANÁLISIS MENSUAL ====================
 with tab1:
 st.subheader("📊 Evolución Mensual: Facturas y Gastos")
 
@@ -186,7 +182,6 @@ try:
     
 except Exception as e:
     st.error(f"Error en Tab 1: {str(e)}")
-==================== TAB 2: POR CATEGORÍA/SUBCATEGORÍA ====================
 with tab2:
 st.subheader("🏷️ Análisis por Categoría y Subcategoría")
 
@@ -255,7 +250,6 @@ try:
     
 except Exception as e:
     st.error(f"Error en Tab 2: {str(e)}")
-==================== TAB 3: NEWTON vs NEWTON PLUS ====================
 with tab3:
 st.subheader("🔄 Newton vs Newton Plus: Análisis Diario con Promedio")
 
@@ -399,7 +393,6 @@ try:
     
 except Exception as e:
     st.error(f"Error en Tab 3: {str(e)}")
-==================== TAB 4: GRÁFICOS AVANZADOS ====================
 with tab4:
 st.subheader("📊 Gráficos Avanzados de Análisis")
 
