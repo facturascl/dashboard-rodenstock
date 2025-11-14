@@ -224,32 +224,30 @@ with tab2:
         if mes_sel_tab2 == "Todos":
             query = f"""
             SELECT 
-                lf.linea_numero,
                 COALESCE(lf.clasificacion_categoria, 'Sin categoría') as categoria,
                 COALESCE(lf.clasificacion_subcategoria, 'Sin subcategoría') as subcategoria,
-                COUNT(DISTINCT f.numerofactura) as cantidad_trabajos,
+                COUNT(DISTINCT f.numerofactura) as cantidad_facturas,
                 SUM(COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0)) as total_subcategoria
             FROM lineas_factura lf
             INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
             WHERE SUBSTR(f.fechaemision, 1, 4) = '{ano_sel}' 
               AND f.fechaemision IS NOT NULL
-            GROUP BY lf.linea_numero, categoria, subcategoria
+            GROUP BY categoria, subcategoria
             ORDER BY total_subcategoria DESC
             """
         else:
             query = f"""
             SELECT 
-                lf.linea_numero,
                 COALESCE(lf.clasificacion_categoria, 'Sin categoría') as categoria,
                 COALESCE(lf.clasificacion_subcategoria, 'Sin subcategoría') as subcategoria,
-                COUNT(DISTINCT f.numerofactura) as cantidad_trabajos,
+                COUNT(DISTINCT f.numerofactura) as cantidad_facturas,
                 SUM(COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0)) as total_subcategoria
             FROM lineas_factura lf
             INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
             WHERE SUBSTR(f.fechaemision, 1, 4) = '{ano_sel}' 
               AND SUBSTR(f.fechaemision, 6, 2) = '{mes_sel_tab2}'
               AND f.fechaemision IS NOT NULL
-            GROUP BY lf.linea_numero, categoria, subcategoria
+            GROUP BY categoria, subcategoria
             ORDER BY total_subcategoria DESC
             """
         
@@ -258,9 +256,9 @@ with tab2:
         
         if not df_cat.empty:
             total_general = df_cat['total_subcategoria'].sum()
-            total_trabajos = df_cat['cantidad_trabajos'].sum()
+            total_trabajos = df_cat['cantidad_facturas'].sum()
             
-            df_cat['promedio'] = df_cat['total_subcategoria'] / df_cat['cantidad_trabajos']
+            df_cat['promedio'] = df_cat['total_subcategoria'] / df_cat['cantidad_facturas']
             df_cat['porcentaje'] = (df_cat['total_subcategoria'] / total_general * 100).round(2)
             
             df_cat['categoria_subcategoria'] = df_cat['categoria'] + ' - ' + df_cat['subcategoria']
@@ -278,8 +276,8 @@ with tab2:
             
             st.plotly_chart(fig, use_container_width=True)
             
-            df_display = df_cat[['categoria', 'subcategoria', 'linea_numero', 'cantidad_trabajos', 'total_subcategoria', 'promedio', 'porcentaje']].copy()
-            df_display.columns = ['Categoría', 'Subcategoría', 'Línea', 'Cantidad', 'Total ($)', 'Promedio ($)', '% del Total']
+            df_display = df_cat[['categoria', 'subcategoria', 'cantidad_facturas', 'total_subcategoria', 'promedio', 'porcentaje']].copy()
+            df_display.columns = ['Categoría', 'Subcategoría', 'Cantidad', 'Total ($)', 'Promedio ($)', '% del Total']
             df_display['Total ($)'] = df_display['Total ($)'].apply(lambda x: f"${x:,.2f}")
             df_display['Promedio ($)'] = df_display['Promedio ($)'].apply(lambda x: f"${x:,.2f}")
             df_display['% del Total'] = df_display['% del Total'].apply(lambda x: f"{x:.2f}%")
@@ -288,7 +286,7 @@ with tab2:
             
             col1, col2, col3 = st.columns(3)
             with col1:
-                st.metric("Total de Trabajos", f"{total_trabajos:,}")
+                st.metric("Total de Facturas", f"{total_trabajos:,}")
             with col2:
                 st.metric("Total General ($)", f"${total_general:,.2f}")
             with col3:
@@ -332,7 +330,6 @@ with tab3:
           AND f.fechaemision >= '{fecha_inicio_str}'
           AND f.fechaemision <= '{fecha_fin_str}'
           AND f.fechaemision IS NOT NULL
-          AND lf.linea_numero = 1
         GROUP BY fecha, categoria_producto
         ORDER BY fecha DESC
         """
@@ -544,7 +541,6 @@ with tab4:
         INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
         WHERE SUBSTR(f.fechaemision, 1, 4) = '{ano_sel}' 
           AND f.fechaemision IS NOT NULL
-          AND lf.linea_numero = 1
         GROUP BY subcategoria
         ORDER BY total DESC
         LIMIT 10
