@@ -69,138 +69,47 @@ mes_param = st.sidebar.selectbox(
 # FUNCIONES DE CONSULTA - CORREGIDAS
 # ============================================================
 
-@st.cache_data(ttl=600)
-def get_totales_periodo(ano_sel, mes_param):
-    """Totales mensuales"""
-    query = f"""
+def get_comparativa_meses_anos():
+    """Comparativa por mes de todos los años - para gráfico interactivo"""
+    query = """
     SELECT 
         CAST(STRFTIME('%Y', fechaemision) AS INTEGER) as ano,
         CAST(STRFTIME('%m', fechaemision) AS INTEGER) as mes,
         COUNT(DISTINCT numerofactura) as cantidad_facturas,
-        CAST(SUM(subtotal + iva) AS INTEGER) as total_general
+        CAST(SUM(subtotal + iva) AS INTEGER) as total_dinero
     FROM facturas
-    WHERE CAST(STRFTIME('%Y', fechaemision) AS INTEGER) = {ano_sel}
-    AND CAST(STRFTIME('%m', fechaemision) AS INTEGER) = {mes_param}
-    AND fechaemision IS NOT NULL
+    WHERE fechaemision IS NOT NULL
     GROUP BY ano, mes
+    ORDER BY ano, mes
     """
     return pd.read_sql_query(query, conn)
 
-@st.cache_data(ttl=600)
-def get_resumen_facturas(ano_sel, mes_param):
-    """Resumen detallado de facturas - SIN columna descripcion (no existe)"""
+def get_subcategorias_desglose(ano_sel, mes_param):
+    """Desglose por subcategoría: cantidad, costo, promedio, %"""
     query = f"""
-    SELECT
-        f.numerofactura,
-        DATE(f.fechaemision) as fecha,
-        (SELECT COUNT(DISTINCT linea_numero) 
-         FROM lineas_factura 
-         WHERE numerofactura = f.numerofactura) as items,
-        CAST(f.subtotal AS INTEGER) as subtotal,
-        CAST(f.iva AS INTEGER) as iva,
-        CAST(f.subtotal + f.iva AS INTEGER) as total
-    FROM facturas f
-    WHERE CAST(STRFTIME('%Y', f.fechaemision) AS INTEGER) = {ano_sel}
-    AND CAST(STRFTIME('%m', f.fechaemision) AS INTEGER) = {mes_param}
-    AND f.fechaemision IS NOT NULL
-    ORDER BY f.fechaemision DESC
-    """
-    return pd.read_sql_query(query, conn)
-
-@st.cache_data(ttl=600)
-def get_categorias_detalle(ano_sel, mes_param):
-    """Categorías y subcategorías"""
-    query = f"""
+    WITH stats_totales AS (
+        SELECT
+            CAST(SUM(CASE WHEN lf.linea_numero = 1 THEN f.subtotal + f.iva ELSE 0 END) AS INTEGER) as total_general
+        FROM lineas_factura lf
+        INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
+        WHERE CAST(STRFTIME('%Y', f.fechaemision) AS INTEGER) = {int(ano_sel)}
+        AND CAST(STRFTIME('%m', f.fechaemision) AS INTEGER) = {int(mes_param)}
+        AND f.fechaemision IS NOT NULL
+    )
     SELECT 
-        COALESCE(lf.clasificacion_categoria, 'Sin categoría') as categoria,
         COALESCE(lf.clasificacion_subcategoria, 'Sin subcategoría') as subcategoria,
         COUNT(DISTINCT lf.numerofactura) as cantidad_facturas,
-        CAST(SUM(CASE WHEN lf.linea_numero = 1 THEN f.subtotal + f.iva ELSE 0 END) AS INTEGER) as total
+        CAST(SUM(CASE WHEN lf.linea_numero = 1 THEN f.subtotal + f.iva ELSE 0 END) AS INTEGER) as total_costo,
+        CAST(AVG(CASE WHEN lf.linea_numero = 1 THEN f.subtotal + f.iva ELSE 0 END) AS INTEGER) as promedio,
+        CAST(100.0 * SUM(CASE WHEN lf.linea_numero = 1 THEN f.subtotal + f.iva ELSE 0 END) / (SELECT total_general FROM stats_totales) AS DECIMAL(5,2)) as porcentaje
     FROM lineas_factura lf
     INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
-    WHERE CAST(STRFTIME('%Y', f.fechaemision) AS INTEGER) = {ano_sel}
-    AND CAST(STRFTIME('%m', f.fechaemision) AS INTEGER) = {mes_param}
-    AND f.fechaemision IS NOT NULL
-    GROUP BY categoria, subcategoria
-    ORDER BY total DESC
-    """
-    return pd.read_sql_query(query, conn)
-
-@st.cache_data(ttl=600)
-def get_newton_diario(ano_sel, mes_param):
-    """Newton vs Newton Plus por día"""
-    query = f"""
-    WITH trabajos AS (
-        SELECT
-            DATE(f.fechaemision) AS dia,
-            f.numerofactura,
-            MAX(CASE WHEN lf.clasificacion_categoria = 'Newton' THEN 1 ELSE 0 END) AS es_newton,
-            MAX(CASE WHEN lf.clasificacion_categoria = 'Newton Plus' THEN 1 ELSE 0 END) AS es_newton_plus,
-            f.subtotal + f.iva as total_factura
-        FROM lineas_factura lf
-        JOIN facturas f ON lf.numerofactura = f.numerofactura
-        WHERE lf.clasificacion_categoria IN ('Newton', 'Newton Plus')
-        AND CAST(STRFTIME('%Y', f.fechaemision) AS INTEGER) = {ano_sel}
-        AND CAST(STRFTIME('%m', f.fechaemision) AS INTEGER) = {mes_param}
-        AND f.fechaemision IS NOT NULL
-        GROUP BY dia, f.numerofactura, total_factura
-    ),
-    resumen_diario AS (
-        SELECT
-            dia,
-            SUM(es_newton) AS cantidad_newton,
-            SUM(CASE WHEN es_newton = 1 THEN total_factura ELSE 0 END) AS total_newton,
-            SUM(es_newton_plus) AS cantidad_newton_plus,
-            SUM(CASE WHEN es_newton_plus = 1 THEN total_factura ELSE 0 END) AS total_newton_plus
-        FROM trabajos
-        GROUP BY dia
-    )
-    SELECT
-        dia,
-        cantidad_newton,
-        CAST(total_newton AS INTEGER) as total_newton,
-        CASE WHEN cantidad_newton > 0 THEN CAST(total_newton / cantidad_newton AS INTEGER) ELSE NULL END AS promedio_newton,
-        cantidad_newton_plus,
-        CAST(total_newton_plus AS INTEGER) as total_newton_plus,
-        CASE WHEN cantidad_newton_plus > 0 THEN CAST(total_newton_plus / cantidad_newton_plus AS INTEGER) ELSE NULL END AS promedio_newton_plus
-    FROM resumen_diario
-    ORDER BY dia DESC
-    """
-    return pd.read_sql_query(query, conn)
-
-@st.cache_data(ttl=600)
-def get_top_subcategorias(ano_sel, mes_param):
-    """Top 10 subcategorías"""
-    query = f"""
-    SELECT 
-        COALESCE(lf.clasificacion_subcategoria, 'Sin subcategoría') as subcategoria,
-        COUNT(DISTINCT lf.numerofactura) as cantidad,
-        CAST(SUM(CASE WHEN lf.linea_numero = 1 THEN f.subtotal + f.iva ELSE 0 END) AS INTEGER) as total
-    FROM lineas_factura lf
-    INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
-    WHERE CAST(STRFTIME('%Y', f.fechaemision) AS INTEGER) = {ano_sel}
-    AND CAST(STRFTIME('%m', f.fechaemision) AS INTEGER) = {mes_param}
+    CROSS JOIN stats_totales
+    WHERE CAST(STRFTIME('%Y', f.fechaemision) AS INTEGER) = {int(ano_sel)}
+    AND CAST(STRFTIME('%m', f.fechaemision) AS INTEGER) = {int(mes_param)}
     AND f.fechaemision IS NOT NULL
     GROUP BY subcategoria
-    ORDER BY total DESC
-    LIMIT 10
-    """
-    return pd.read_sql_query(query, conn)
-
-@st.cache_data(ttl=600)
-def get_comparativa_anos(mes_param):
-    """Comparativa de 2 años por mes - AGREGADO PERDIDO"""
-    query = f"""
-    SELECT 
-        CAST(STRFTIME('%Y', fechaemision) AS INTEGER) as ano,
-        CAST(STRFTIME('%m', fechaemision) AS INTEGER) as mes,
-        COUNT(DISTINCT numerofactura) as cantidad_facturas,
-        CAST(SUM(subtotal + iva) AS INTEGER) as total_mes
-    FROM facturas
-    WHERE CAST(STRFTIME('%m', fechaemision) AS INTEGER) = {mes_param}
-    AND fechaemision IS NOT NULL
-    GROUP BY ano, mes
-    ORDER BY ano DESC
+    ORDER BY total_costo DESC
     """
     return pd.read_sql_query(query, conn)
 
@@ -525,6 +434,6 @@ col1, col2, col3 = st.columns(3)
 with col1:
     st.caption("✅ Base de datos: SQLite")
 with col2:
-    st.caption(f"📅 Última actualización: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+    st.caption(f"📅 Última actualización: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
 with col3:
-    st.caption("🔧 Rodenstock Dashboard v3.1")
+    st.caption("🔧 Rodenstock Dashboard v4.0 - REDISEÑADO")
