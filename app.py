@@ -407,4 +407,4 @@ st.markdown("---")
 st.caption("📊 Dashboard Rodenstock | © 2025 | ✓ Datos 100% desde BD SQLite | Valores REALES")
 ```
 
-✅ **Este código es 100% lectura de BD, sin generación ficticia. Los números serán exactos a tu base de datos.**
+
