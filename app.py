@@ -92,6 +92,34 @@ def get_subcategorias_completo(ano):
     return pd.read_sql_query(query, conn)
 
 @st.cache_data(ttl=300)
+def get_subcategorias_completo_mes(ano, mes):
+    """Todas las subcategorías por mes: cantidad, costo, promedio, porcentaje"""
+    query = f"""
+    WITH stats_totales AS (
+        SELECT CAST(SUM(f.subtotal + f.iva) AS INTEGER) as total_general
+        FROM lineas_factura lf
+        INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
+        WHERE CAST(STRFTIME('%Y', f.fechaemision) AS INTEGER) = {int(ano)}
+        AND CAST(STRFTIME('%m', f.fechaemision) AS INTEGER) = {int(mes)}
+        AND f.fechaemision IS NOT NULL
+    )
+    SELECT 
+        COALESCE(lf.clasificacion_subcategoria, 'Sin clasificación') as subcategoria,
+        COUNT(DISTINCT lf.numerofactura) as cantidad,
+        CAST(SUM(f.subtotal + f.iva) AS INTEGER) as costo,
+        CAST(SUM(f.subtotal + f.iva) / NULLIF(COUNT(DISTINCT lf.numerofactura), 0) AS INTEGER) as promedio,
+        CAST(100.0 * SUM(f.subtotal + f.iva) / NULLIF((SELECT total_general FROM stats_totales), 0) AS DECIMAL(5,2)) as pct
+    FROM lineas_factura lf
+    INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
+    WHERE CAST(STRFTIME('%Y', f.fechaemision) AS INTEGER) = {int(ano)}
+    AND CAST(STRFTIME('%m', f.fechaemision) AS INTEGER) = {int(mes)}
+    AND f.fechaemision IS NOT NULL
+    GROUP BY subcategoria
+    ORDER BY costo DESC
+    """
+    return pd.read_sql_query(query, conn)
+
+@st.cache_data(ttl=300)
 def get_newton_rango(fecha_inicio, fecha_fin):
     """Newton vs Newton Plus con rango de fechas: cantidad y promedio diario"""
     query = f"""
@@ -129,6 +157,33 @@ def get_analisis_subcategorias(ano):
     FROM lineas_factura lf
     INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
     WHERE CAST(STRFTIME('%Y', f.fechaemision) AS INTEGER) = {int(ano)}
+    AND f.fechaemision IS NOT NULL
+    GROUP BY subcategoria
+    ORDER BY total DESC
+    """
+    return pd.read_sql_query(query, conn)
+
+@st.cache_data(ttl=300)
+def get_analisis_subcategorias_mes(ano, mes):
+    """Análisis COMPLETO por subcategoría - por mes"""
+    query = f"""
+    WITH stats_totales AS (
+        SELECT CAST(SUM(f.subtotal + f.iva) AS INTEGER) as total_general
+        FROM facturas f
+        WHERE CAST(STRFTIME('%Y', f.fechaemision) AS INTEGER) = {int(ano)}
+        AND CAST(STRFTIME('%m', f.fechaemision) AS INTEGER) = {int(mes)}
+        AND f.fechaemision IS NOT NULL
+    )
+    SELECT 
+        COALESCE(lf.clasificacion_subcategoria, 'Sin clasificación') as subcategoria,
+        COUNT(DISTINCT lf.numerofactura) as cantidad,
+        CAST(SUM(f.subtotal + f.iva) AS INTEGER) as total,
+        CAST(SUM(f.subtotal + f.iva) / NULLIF(COUNT(DISTINCT lf.numerofactura), 0) AS INTEGER) as promedio,
+        CAST(100.0 * SUM(f.subtotal + f.iva) / NULLIF((SELECT total_general FROM stats_totales), 0) AS DECIMAL(5,2)) as pct
+    FROM lineas_factura lf
+    INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
+    WHERE CAST(STRFTIME('%Y', f.fechaemision) AS INTEGER) = {int(ano)}
+    AND CAST(STRFTIME('%m', f.fechaemision) AS INTEGER) = {int(mes)}
     AND f.fechaemision IS NOT NULL
     GROUP BY subcategoria
     ORDER BY total DESC
@@ -275,7 +330,17 @@ with tab1:
 with tab2:
     st.header(f"🏷️ Desglose Subcategorías - Año {ano1}")
     
-    df_subcat = get_subcategorias_completo(ano1)
+    col_mes, col_space = st.columns([2, 10])
+    with col_mes:
+        mes_tab2 = st.selectbox(
+            "📅 Mes",
+            range(1, 13),
+            index=0,
+            format_func=lambda x: meses_nombres[x-1],
+            key="tab2_mes"
+        )
+    
+    df_subcat = get_subcategorias_completo_mes(ano1, mes_tab2)
     
     if not df_subcat.empty:
         # Métricas
@@ -315,6 +380,22 @@ with tab2:
             hovertemplate='<b>%{label}</b><br>$%{value:,.0f}<br>%{percent}<extra></extra>'
         )])
         st.plotly_chart(fig_pie, use_container_width=True)
+        
+        st.subheader("Detalle en Gráfico de Barras")
+        fig_bar = go.Figure(data=[go.Bar(
+            x=df_subcat['subcategoria'],
+            y=df_subcat['costo'],
+            text=[f"{p:.1f}%" for p in df_subcat['pct']],
+            textposition='outside',
+            marker=dict(color=df_subcat['costo'], colorscale='Viridis'),
+            hovertemplate='<b>%{x}</b><br>Cantidad: ' + df_subcat['cantidad'].astype(str) + '<br>Total: $%{y:,.0f}<br>Promedio: $' + df_subcat['promedio'].astype(str) + '<extra></extra>'
+        )])
+        fig_bar.update_layout(
+            xaxis_title="Subcategoría",
+            yaxis_title="Total ($)",
+            height=400
+        )
+        st.plotly_chart(fig_bar, use_container_width=True)
     else:
         st.info("ℹ️ Sin datos de subcategorías")
 
@@ -394,7 +475,17 @@ with tab3:
 with tab4:
     st.header(f"📍 Análisis Completo por Subcategoría - Año {ano1}")
     
-    df_subcat_full = get_analisis_subcategorias(ano1)
+    col_mes, col_space = st.columns([2, 10])
+    with col_mes:
+        mes_tab4 = st.selectbox(
+            "📅 Mes",
+            range(1, 13),
+            index=0,
+            format_func=lambda x: meses_nombres[x-1],
+            key="tab4_mes"
+        )
+    
+    df_subcat_full = get_analisis_subcategorias_mes(ano1, mes_tab4)
     
     if not df_subcat_full.empty:
         # Métricas
