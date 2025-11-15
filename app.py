@@ -65,69 +65,123 @@ def get_comparativa_12_meses(ano):
 
 @st.cache_data(ttl=300)
 def get_subcategorias_completo_mes(ano, mes):
-    """Todas las subcategorías por mes: cantidad, costo, promedio, porcentaje - CORREGIDO"""
+    """Todas las subcategorías por mes: cantidad, costo, promedio, porcentaje - Lookerstudio Logic"""
     query = f"""
-    WITH fact_consolidadas AS (
-        SELECT 
-            lf.clasificacion_categoria,
-            lf.clasificacion_subcategoria,
-            f.numerofactura,
-            SUM(f.subtotal + f.iva) as monto_total
-        FROM lineas_factura lf
-        INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
-        WHERE CAST(STRFTIME('%Y', f.fechaemision) AS INTEGER) = {int(ano)}
-        AND CAST(STRFTIME('%m', f.fechaemision) AS INTEGER) = {int(mes)}
-        AND f.fechaemision IS NOT NULL
-        GROUP BY f.numerofactura, lf.clasificacion_categoria, lf.clasificacion_subcategoria
+    WITH facturas_clasificadas AS (
+      SELECT
+        f.fechaemision,
+        f.numerofactura,
+        CASE 
+          WHEN lf.clasificacion_categoria IS NULL 
+               OR lf.clasificacion_categoria = 'Sin clasificacion' 
+               OR TRIM(lf.clasificacion_categoria) = ''
+            THEN 'Otros'
+          ELSE lf.clasificacion_categoria
+        END AS categoria,
+        COALESCE(lf.clasificacion_subcategoria, '') AS subcategoria,
+        COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0) AS total_factura
+      FROM lineas_factura lf
+      JOIN facturas f
+        ON lf.numerofactura = f.numerofactura
+      WHERE f.fechaemision IS NOT NULL
+      GROUP BY
+        f.fechaemision,
+        f.numerofactura,
+        categoria,
+        subcategoria,
+        total_factura
     ),
-    stats_totales AS (
-        SELECT CAST(SUM(monto_total) AS INTEGER) as total_general
-        FROM fact_consolidadas
+    resumen_categorias AS (
+      SELECT
+        CAST(STRFTIME('%Y', fechaemision) AS INTEGER) AS ano,
+        CAST(STRFTIME('%m', fechaemision) AS INTEGER) AS mes,
+        categoria,
+        subcategoria,
+        COUNT(DISTINCT numerofactura) AS cantidad_trabajos,
+        SUM(total_factura) AS total_dinero,
+        AVG(total_factura) AS promedio_trabajo
+      FROM facturas_clasificadas
+      WHERE CAST(STRFTIME('%Y', fechaemision)) = {ano}
+        AND CAST(STRFTIME('%m', fechaemision)) = {mes}
+      GROUP BY ano, mes, categoria, subcategoria
+    ),
+    totales_mes AS (
+      SELECT
+        SUM(total_dinero) AS total_mes,
+        SUM(cantidad_trabajos) AS total_trabajos
+      FROM resumen_categorias
     )
-    SELECT 
-        COALESCE(clasificacion_categoria, 'Sin categoría') as categoria,
-        COALESCE(clasificacion_subcategoria, 'Sin clasificación') as subcategoria,
-        COUNT(*) as cantidad,
-        CAST(SUM(monto_total) AS INTEGER) as costo,
-        CAST(SUM(monto_total) / NULLIF(COUNT(*), 0) AS INTEGER) as promedio,
-        CAST(100.0 * SUM(monto_total) / NULLIF((SELECT total_general FROM stats_totales), 0) AS DECIMAL(5,2)) as pct
-    FROM fact_consolidadas
-    GROUP BY categoria, subcategoria
-    ORDER BY costo DESC
+    SELECT
+      rc.categoria,
+      rc.subcategoria,
+      rc.cantidad_trabajos AS cantidad,
+      CAST(rc.total_dinero AS INTEGER) AS costo,
+      CAST(rc.promedio_trabajo AS INTEGER) AS promedio,
+      ROUND((rc.total_dinero / tm.total_mes) * 100, 2) AS pct
+    FROM resumen_categorias rc
+    CROSS JOIN totales_mes tm
+    ORDER BY rc.total_dinero DESC
     """
     return pd.read_sql_query(query, conn)
 
 @st.cache_data(ttl=300)
 def get_analisis_subcategorias_mes(ano, mes):
-    """Análisis COMPLETO por subcategoría - por mes - CORREGIDO"""
+    """Análisis COMPLETO por subcategoría - Lookerstudio Logic"""
     query = f"""
-    WITH fact_consolidadas AS (
-        SELECT 
-            lf.clasificacion_categoria,
-            lf.clasificacion_subcategoria,
-            f.numerofactura,
-            SUM(f.subtotal + f.iva) as monto_total
-        FROM lineas_factura lf
-        INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
-        WHERE CAST(STRFTIME('%Y', f.fechaemision) AS INTEGER) = {int(ano)}
-        AND CAST(STRFTIME('%m', f.fechaemision) AS INTEGER) = {int(mes)}
-        AND f.fechaemision IS NOT NULL
-        GROUP BY f.numerofactura, lf.clasificacion_categoria, lf.clasificacion_subcategoria
+    WITH facturas_clasificadas AS (
+      SELECT
+        f.fechaemision,
+        f.numerofactura,
+        CASE 
+          WHEN lf.clasificacion_categoria IS NULL 
+               OR lf.clasificacion_categoria = 'Sin clasificacion' 
+               OR TRIM(lf.clasificacion_categoria) = ''
+            THEN 'Otros'
+          ELSE lf.clasificacion_categoria
+        END AS categoria,
+        COALESCE(lf.clasificacion_subcategoria, '') AS subcategoria,
+        COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0) AS total_factura
+      FROM lineas_factura lf
+      JOIN facturas f
+        ON lf.numerofactura = f.numerofactura
+      WHERE f.fechaemision IS NOT NULL
+      GROUP BY
+        f.fechaemision,
+        f.numerofactura,
+        categoria,
+        subcategoria,
+        total_factura
     ),
-    stats_totales AS (
-        SELECT CAST(SUM(monto_total) AS INTEGER) as total_general
-        FROM fact_consolidadas
+    resumen_categorias AS (
+      SELECT
+        CAST(STRFTIME('%Y', fechaemision) AS INTEGER) AS ano,
+        CAST(STRFTIME('%m', fechaemision) AS INTEGER) AS mes,
+        categoria,
+        subcategoria,
+        COUNT(DISTINCT numerofactura) AS cantidad_trabajos,
+        SUM(total_factura) AS total_dinero,
+        AVG(total_factura) AS promedio_trabajo
+      FROM facturas_clasificadas
+      WHERE CAST(STRFTIME('%Y', fechaemision)) = {ano}
+        AND CAST(STRFTIME('%m', fechaemision)) = {mes}
+      GROUP BY ano, mes, categoria, subcategoria
+    ),
+    totales_mes AS (
+      SELECT
+        SUM(total_dinero) AS total_mes,
+        SUM(cantidad_trabajos) AS total_trabajos
+      FROM resumen_categorias
     )
-    SELECT 
-        COALESCE(clasificacion_categoria, 'Sin categoría') as categoria,
-        COALESCE(clasificacion_subcategoria, 'Sin clasificación') as subcategoria,
-        COUNT(*) as cantidad,
-        CAST(SUM(monto_total) AS INTEGER) as total,
-        CAST(SUM(monto_total) / NULLIF(COUNT(*), 0) AS INTEGER) as promedio,
-        CAST(100.0 * SUM(monto_total) / NULLIF((SELECT total_general FROM stats_totales), 0) AS DECIMAL(5,2)) as pct
-    FROM fact_consolidadas
-    GROUP BY categoria, subcategoria
-    ORDER BY total DESC
+    SELECT
+      rc.categoria,
+      rc.subcategoria,
+      rc.cantidad_trabajos AS cantidad,
+      CAST(rc.total_dinero AS INTEGER) AS total,
+      CAST(rc.promedio_trabajo AS INTEGER) AS promedio,
+      ROUND((rc.total_dinero / tm.total_mes) * 100, 2) AS pct
+    FROM resumen_categorias rc
+    CROSS JOIN totales_mes tm
+    ORDER BY rc.total_dinero DESC
     """
     return pd.read_sql_query(query, conn)
 
