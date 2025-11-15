@@ -72,7 +72,7 @@ def get_subcategorias_completo_mes(ano, mes):
             lf.clasificacion_categoria,
             lf.clasificacion_subcategoria,
             f.numerofactura,
-            (f.subtotal + f.iva) as monto_total
+            SUM(f.subtotal + f.iva) as monto_total
         FROM lineas_factura lf
         INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
         WHERE CAST(STRFTIME('%Y', f.fechaemision) AS INTEGER) = {int(ano)}
@@ -106,7 +106,7 @@ def get_analisis_subcategorias_mes(ano, mes):
             lf.clasificacion_categoria,
             lf.clasificacion_subcategoria,
             f.numerofactura,
-            (f.subtotal + f.iva) as monto_total
+            SUM(f.subtotal + f.iva) as monto_total
         FROM lineas_factura lf
         INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
         WHERE CAST(STRFTIME('%Y', f.fechaemision) AS INTEGER) = {int(ano)}
@@ -139,6 +139,7 @@ def get_newton_rango(fecha_inicio, fecha_fin):
         STRFTIME('%Y-%m-%d', f.fechaemision) as fecha,
         CASE WHEN lf.clasificacion_categoria = 'Newton' THEN 'Newton' ELSE 'Newton Plus' END as tipo,
         COUNT(DISTINCT f.numerofactura) as cantidad,
+        CAST(SUM(f.subtotal + f.iva) AS INTEGER) as total_diario,
         CAST(SUM(f.subtotal + f.iva) / NULLIF(COUNT(DISTINCT f.numerofactura), 0) AS INTEGER) as promedio_diario
     FROM lineas_factura lf
     INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
@@ -536,4 +537,4 @@ with tab4:
 # PIE
 # ============================================================
 st.divider()
-st.caption(f"✅ Dashboard v4.0 MEJORADO | {datetime.now().strftime('%d/%m/%Y %H:%M')} | Año {ano_actual}")
+st.caption(f"✅ Dashboard v4.1 CORREGIDO | {datetime.now().strftime('%d/%m/%Y %H:%M')} | Año {ano_actual}")
