@@ -67,9 +67,10 @@ def get_comparativa_12_meses(ano):
 def get_subcategorias_completo_mes(ano, mes):
     """Todas las subcategorías por mes: cantidad, costo, promedio, porcentaje - Lookerstudio Logic"""
     query = f"""
-    WITH facturas_clasificadas AS (
+    WITH facturas_diarias AS (
       SELECT
-        f.fechaemision,
+        CAST(STRFTIME('%Y', f.fechaemision) AS INTEGER) AS ano,
+        CAST(STRFTIME('%m', f.fechaemision) AS INTEGER) AS mes,
         f.numerofactura,
         CASE 
           WHEN lf.clasificacion_categoria IS NULL 
@@ -81,28 +82,20 @@ def get_subcategorias_completo_mes(ano, mes):
         COALESCE(lf.clasificacion_subcategoria, '') AS subcategoria,
         COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0) AS total_factura
       FROM lineas_factura lf
-      JOIN facturas f
-        ON lf.numerofactura = f.numerofactura
+      INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
       WHERE f.fechaemision IS NOT NULL
-      GROUP BY
-        f.fechaemision,
-        f.numerofactura,
-        categoria,
-        subcategoria,
-        total_factura
     ),
     resumen_categorias AS (
       SELECT
-        CAST(STRFTIME('%Y', fechaemision) AS INTEGER) AS ano,
-        CAST(STRFTIME('%m', fechaemision) AS INTEGER) AS mes,
+        ano,
+        mes,
         categoria,
         subcategoria,
         COUNT(DISTINCT numerofactura) AS cantidad_trabajos,
         SUM(total_factura) AS total_dinero,
         AVG(total_factura) AS promedio_trabajo
-      FROM facturas_clasificadas
-      WHERE CAST(STRFTIME('%Y', fechaemision)) = {ano}
-        AND CAST(STRFTIME('%m', fechaemision)) = {mes}
+      FROM facturas_diarias
+      WHERE ano = {ano} AND mes = {mes}
       GROUP BY ano, mes, categoria, subcategoria
     ),
     totales_mes AS (
@@ -128,9 +121,10 @@ def get_subcategorias_completo_mes(ano, mes):
 def get_analisis_subcategorias_mes(ano, mes):
     """Análisis COMPLETO por subcategoría - Lookerstudio Logic"""
     query = f"""
-    WITH facturas_clasificadas AS (
+    WITH facturas_diarias AS (
       SELECT
-        f.fechaemision,
+        CAST(STRFTIME('%Y', f.fechaemision) AS INTEGER) AS ano,
+        CAST(STRFTIME('%m', f.fechaemision) AS INTEGER) AS mes,
         f.numerofactura,
         CASE 
           WHEN lf.clasificacion_categoria IS NULL 
@@ -142,28 +136,20 @@ def get_analisis_subcategorias_mes(ano, mes):
         COALESCE(lf.clasificacion_subcategoria, '') AS subcategoria,
         COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0) AS total_factura
       FROM lineas_factura lf
-      JOIN facturas f
-        ON lf.numerofactura = f.numerofactura
+      INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
       WHERE f.fechaemision IS NOT NULL
-      GROUP BY
-        f.fechaemision,
-        f.numerofactura,
-        categoria,
-        subcategoria,
-        total_factura
     ),
     resumen_categorias AS (
       SELECT
-        CAST(STRFTIME('%Y', fechaemision) AS INTEGER) AS ano,
-        CAST(STRFTIME('%m', fechaemision) AS INTEGER) AS mes,
+        ano,
+        mes,
         categoria,
         subcategoria,
         COUNT(DISTINCT numerofactura) AS cantidad_trabajos,
         SUM(total_factura) AS total_dinero,
         AVG(total_factura) AS promedio_trabajo
-      FROM facturas_clasificadas
-      WHERE CAST(STRFTIME('%Y', fechaemision)) = {ano}
-        AND CAST(STRFTIME('%m', fechaemision)) = {mes}
+      FROM facturas_diarias
+      WHERE ano = {ano} AND mes = {mes}
       GROUP BY ano, mes, categoria, subcategoria
     ),
     totales_mes AS (
@@ -191,16 +177,20 @@ def get_newton_rango(fecha_inicio, fecha_fin):
     query = f"""
     SELECT 
         STRFTIME('%Y-%m-%d', f.fechaemision) as fecha,
-        CASE WHEN lf.clasificacion_categoria = 'Newton' THEN 'Newton' ELSE 'Newton Plus' END as tipo,
+        CASE 
+          WHEN lf.clasificacion_categoria = 'Newton' THEN 'Newton' 
+          WHEN lf.clasificacion_categoria = 'Newton Plus' THEN 'Newton Plus'
+          ELSE 'Otro'
+        END as tipo,
         COUNT(DISTINCT f.numerofactura) as cantidad,
-        CAST(SUM(f.subtotal + f.iva) AS INTEGER) as total_diario,
-        CAST(SUM(f.subtotal + f.iva) / NULLIF(COUNT(DISTINCT f.numerofactura), 0) AS INTEGER) as promedio_diario
+        CAST(SUM(COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0)) AS INTEGER) as total_diario,
+        CAST(SUM(COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0)) / NULLIF(COUNT(DISTINCT f.numerofactura), 0) AS INTEGER) as promedio_diario
     FROM lineas_factura lf
     INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
     WHERE f.fechaemision BETWEEN '{fecha_inicio}' AND '{fecha_fin}'
     AND lf.clasificacion_categoria IN ('Newton', 'Newton Plus')
     AND f.fechaemision IS NOT NULL
-    GROUP BY fecha, tipo
+    GROUP BY STRFTIME('%Y-%m-%d', f.fechaemision), tipo
     ORDER BY fecha DESC, tipo
     """
     return pd.read_sql_query(query, conn)
