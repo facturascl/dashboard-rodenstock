@@ -1,10 +1,12 @@
+<<<<<<< HEAD
 
+=======
+>>>>>>> 54c3394 (Agregar guías de actualización de dashboard)
 # Credenciales (NUNCA subir)
 bigquery-credentials.json
 credentials.json
 token.json
-*.json
-!requirements.txt
+# ← ELIMINA la línea "*.json" (muy amplia)
 
 # Datos y outputs
 outputs/
@@ -37,7 +39,12 @@ Rodenstock/
 # Mac
 .DS_Store
 
+<<<<<<< HEAD
 facturas.db
    __pycache__/
    *.pyc
    .streamlit/
+=======
+# DATABASE - NUNCA versionar
+facturas.db
+>>>>>>> 54c3394 (Agregar guías de actualización de dashboard)
