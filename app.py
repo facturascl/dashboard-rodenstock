@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 import sqlite3
 from datetime import datetime
 
@@ -71,22 +70,22 @@ def get_subcategorias_completo(ano):
     query = f"""
     WITH stats_totales AS (
         SELECT CAST(SUM(f.subtotal + f.iva) AS INTEGER) as total_general
-        FROM lineas_factura lf
-        INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
+        FROM facturas f
         WHERE CAST(STRFTIME('%Y', f.fechaemision) AS INTEGER) = {int(ano)}
         AND f.fechaemision IS NOT NULL
     )
     SELECT 
+        COALESCE(lf.clasificacion_categoria, 'Sin categoría') as categoria,
         COALESCE(lf.clasificacion_subcategoria, 'Sin clasificación') as subcategoria,
-        COUNT(DISTINCT lf.numerofactura) as cantidad,
+        COUNT(DISTINCT f.numerofactura) as cantidad,
         CAST(SUM(f.subtotal + f.iva) AS INTEGER) as costo,
-        CAST(SUM(f.subtotal + f.iva) / NULLIF(COUNT(DISTINCT lf.numerofactura), 0) AS INTEGER) as promedio,
+        CAST(SUM(f.subtotal + f.iva) / NULLIF(COUNT(DISTINCT f.numerofactura), 0) AS INTEGER) as promedio,
         CAST(100.0 * SUM(f.subtotal + f.iva) / NULLIF((SELECT total_general FROM stats_totales), 0) AS DECIMAL(5,2)) as pct
     FROM lineas_factura lf
     INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
     WHERE CAST(STRFTIME('%Y', f.fechaemision) AS INTEGER) = {int(ano)}
     AND f.fechaemision IS NOT NULL
-    GROUP BY subcategoria
+    GROUP BY categoria, subcategoria
     ORDER BY costo DESC
     """
     return pd.read_sql_query(query, conn)
@@ -97,24 +96,24 @@ def get_subcategorias_completo_mes(ano, mes):
     query = f"""
     WITH stats_totales AS (
         SELECT CAST(SUM(f.subtotal + f.iva) AS INTEGER) as total_general
-        FROM lineas_factura lf
-        INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
+        FROM facturas f
         WHERE CAST(STRFTIME('%Y', f.fechaemision) AS INTEGER) = {int(ano)}
         AND CAST(STRFTIME('%m', f.fechaemision) AS INTEGER) = {int(mes)}
         AND f.fechaemision IS NOT NULL
     )
     SELECT 
+        COALESCE(lf.clasificacion_categoria, 'Sin categoría') as categoria,
         COALESCE(lf.clasificacion_subcategoria, 'Sin clasificación') as subcategoria,
-        COUNT(DISTINCT lf.numerofactura) as cantidad,
+        COUNT(DISTINCT f.numerofactura) as cantidad,
         CAST(SUM(f.subtotal + f.iva) AS INTEGER) as costo,
-        CAST(SUM(f.subtotal + f.iva) / NULLIF(COUNT(DISTINCT lf.numerofactura), 0) AS INTEGER) as promedio,
+        CAST(SUM(f.subtotal + f.iva) / NULLIF(COUNT(DISTINCT f.numerofactura), 0) AS INTEGER) as promedio,
         CAST(100.0 * SUM(f.subtotal + f.iva) / NULLIF((SELECT total_general FROM stats_totales), 0) AS DECIMAL(5,2)) as pct
     FROM lineas_factura lf
     INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
     WHERE CAST(STRFTIME('%Y', f.fechaemision) AS INTEGER) = {int(ano)}
     AND CAST(STRFTIME('%m', f.fechaemision) AS INTEGER) = {int(mes)}
     AND f.fechaemision IS NOT NULL
-    GROUP BY subcategoria
+    GROUP BY categoria, subcategoria
     ORDER BY costo DESC
     """
     return pd.read_sql_query(query, conn)
@@ -149,16 +148,17 @@ def get_analisis_subcategorias(ano):
         AND f.fechaemision IS NOT NULL
     )
     SELECT 
+        COALESCE(lf.clasificacion_categoria, 'Sin categoría') as categoria,
         COALESCE(lf.clasificacion_subcategoria, 'Sin clasificación') as subcategoria,
-        COUNT(DISTINCT lf.numerofactura) as cantidad,
+        COUNT(DISTINCT f.numerofactura) as cantidad,
         CAST(SUM(f.subtotal + f.iva) AS INTEGER) as total,
-        CAST(SUM(f.subtotal + f.iva) / NULLIF(COUNT(DISTINCT lf.numerofactura), 0) AS INTEGER) as promedio,
+        CAST(SUM(f.subtotal + f.iva) / NULLIF(COUNT(DISTINCT f.numerofactura), 0) AS INTEGER) as promedio,
         CAST(100.0 * SUM(f.subtotal + f.iva) / NULLIF((SELECT total_general FROM stats_totales), 0) AS DECIMAL(5,2)) as pct
     FROM lineas_factura lf
     INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
     WHERE CAST(STRFTIME('%Y', f.fechaemision) AS INTEGER) = {int(ano)}
     AND f.fechaemision IS NOT NULL
-    GROUP BY subcategoria
+    GROUP BY categoria, subcategoria
     ORDER BY total DESC
     """
     return pd.read_sql_query(query, conn)
@@ -175,17 +175,18 @@ def get_analisis_subcategorias_mes(ano, mes):
         AND f.fechaemision IS NOT NULL
     )
     SELECT 
+        COALESCE(lf.clasificacion_categoria, 'Sin categoría') as categoria,
         COALESCE(lf.clasificacion_subcategoria, 'Sin clasificación') as subcategoria,
-        COUNT(DISTINCT lf.numerofactura) as cantidad,
+        COUNT(DISTINCT f.numerofactura) as cantidad,
         CAST(SUM(f.subtotal + f.iva) AS INTEGER) as total,
-        CAST(SUM(f.subtotal + f.iva) / NULLIF(COUNT(DISTINCT lf.numerofactura), 0) AS INTEGER) as promedio,
+        CAST(SUM(f.subtotal + f.iva) / NULLIF(COUNT(DISTINCT f.numerofactura), 0) AS INTEGER) as promedio,
         CAST(100.0 * SUM(f.subtotal + f.iva) / NULLIF((SELECT total_general FROM stats_totales), 0) AS DECIMAL(5,2)) as pct
     FROM lineas_factura lf
     INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
     WHERE CAST(STRFTIME('%Y', f.fechaemision) AS INTEGER) = {int(ano)}
     AND CAST(STRFTIME('%m', f.fechaemision) AS INTEGER) = {int(mes)}
     AND f.fechaemision IS NOT NULL
-    GROUP BY subcategoria
+    GROUP BY categoria, subcategoria
     ORDER BY total DESC
     """
     return pd.read_sql_query(query, conn)
@@ -363,6 +364,7 @@ with tab2:
             use_container_width=True,
             hide_index=True,
             column_config={
+                "categoria": st.column_config.TextColumn("Categoría", width=150),
                 "subcategoria": st.column_config.TextColumn("Subcategoría", width=200),
                 "cantidad": st.column_config.NumberColumn("Cantidad", width=100),
                 "costo": st.column_config.NumberColumn("Total ($)", width=130, format="$%d"),
@@ -388,7 +390,7 @@ with tab2:
             text=[f"{p:.1f}%" for p in df_subcat['pct']],
             textposition='outside',
             marker=dict(color=df_subcat['costo'], colorscale='Viridis'),
-            hovertemplate='<b>%{x}</b><br>Cantidad: ' + df_subcat['cantidad'].astype(str) + '<br>Total: $%{y:,.0f}<br>Promedio: $' + df_subcat['promedio'].astype(str) + '<extra></extra>'
+            hovertemplate='<b>%{x}</b><br>Categoría: ' + df_subcat['categoria'].astype(str) + '<br>Cantidad: ' + df_subcat['cantidad'].astype(str) + '<br>Total: $%{y:,.0f}<br>Promedio: $' + df_subcat['promedio'].astype(str) + '<extra></extra>'
         )])
         fig_bar.update_layout(
             xaxis_title="Subcategoría",
@@ -400,7 +402,7 @@ with tab2:
         st.info("ℹ️ Sin datos de subcategorías")
 
 # ============================================================
-# TAB 3: NEWTON VS NEWTON PLUS
+# TAB 3: NEWTON VS NEWTON PLUS (GRÁFICO UNIFICADO)
 # ============================================================
 with tab3:
     st.header(f"📈 Newton vs Newton Plus")
@@ -415,7 +417,7 @@ with tab3:
     df_newton = get_newton_rango(fecha_inicio.strftime('%Y-%m-%d'), fecha_fin.strftime('%Y-%m-%d'))
     
     if not df_newton.empty:
-        # Gráfico COMBINADO
+        # Gráfico UNIFICADO (UN SOLO gráfico con 2 ejes Y)
         df_newton_pivot_cant = df_newton.pivot_table(
             index='fecha', columns='tipo', values='cantidad', aggfunc='sum', fill_value=0
         )
@@ -423,48 +425,38 @@ with tab3:
             index='fecha', columns='tipo', values='promedio_unitario', aggfunc='first', fill_value=0
         )
         
-        fig = make_subplots(
-            rows=2, cols=1,
-            subplot_titles=("Cantidad Diaria", "Promedio Unitario Diario"),
-            vertical_spacing=0.12,
-            row_heights=[0.5, 0.5]
-        )
+        fig = go.Figure()
         
-        # Gráfico 1: Cantidad
+        # Barras para cantidad
         for col in df_newton_pivot_cant.columns:
-            fig.add_trace(
-                go.Bar(
-                    x=df_newton_pivot_cant.index,
-                    y=df_newton_pivot_cant[col],
-                    name=f"{col}",
-                    opacity=0.7
-                ),
-                row=1, col=1
-            )
+            fig.add_trace(go.Bar(
+                x=df_newton_pivot_cant.index,
+                y=df_newton_pivot_cant[col],
+                name=f"{col} (Cantidad)",
+                yaxis='y1',
+                opacity=0.7
+            ))
         
-        # Gráfico 2: Promedio
+        # Líneas para promedio
         for col in df_newton_pivot_prom.columns:
-            fig.add_trace(
-                go.Scatter(
-                    x=df_newton_pivot_prom.index,
-                    y=df_newton_pivot_prom[col],
-                    name=f"Prom {col}",
-                    mode='lines+markers',
-                    line=dict(width=2),
-                    showlegend=True
-                ),
-                row=2, col=1
-            )
-        
-        fig.update_yaxes(title_text="Cantidad", row=1, col=1)
-        fig.update_yaxes(title_text="Promedio ($)", row=2, col=1)
-        fig.update_xaxes(title_text="Fecha", row=2, col=1)
+            fig.add_trace(go.Scatter(
+                x=df_newton_pivot_prom.index,
+                y=df_newton_pivot_prom[col],
+                name=f"{col} (Promedio)",
+                yaxis='y2',
+                mode='lines+markers',
+                line=dict(width=2)
+            ))
         
         fig.update_layout(
-            height=600,
+            xaxis_title="Fecha",
+            yaxis=dict(title="Cantidad", side='left'),
+            yaxis2=dict(title="Promedio ($)", overlaying='y', side='right'),
             hovermode='x unified',
+            height=500,
             showlegend=True
         )
+        
         st.plotly_chart(fig, use_container_width=True)
     else:
         st.info("ℹ️ Sin datos Newton/Newton Plus en este rango")
@@ -506,6 +498,7 @@ with tab4:
             use_container_width=True,
             hide_index=True,
             column_config={
+                "categoria": st.column_config.TextColumn("Categoría", width=150),
                 "subcategoria": st.column_config.TextColumn("Subcategoría", width=220),
                 "cantidad": st.column_config.NumberColumn("Cantidad de Trabajos", width=130),
                 "total": st.column_config.NumberColumn("Total ($)", width=140, format="$%d"),
@@ -521,7 +514,8 @@ with tab4:
             y=df_subcat_full['total'],
             text=[f"{p:.1f}%" for p in df_subcat_full['pct']],
             textposition='outside',
-            marker=dict(color=df_subcat_full['total'], colorscale='Viridis')
+            marker=dict(color=df_subcat_full['total'], colorscale='Viridis'),
+            hovertemplate='<b>%{x}</b><br>Categoría: ' + df_subcat_full['categoria'].astype(str) + '<br>Cantidad: ' + df_subcat_full['cantidad'].astype(str) + '<br>Total: $%{y:,.0f}<extra></extra>'
         )])
         fig.update_layout(
             xaxis_title="Subcategoría",
@@ -536,4 +530,4 @@ with tab4:
 # PIE
 # ============================================================
 st.divider()
-st.caption(f"✅ Dashboard v3.0 | {datetime.now().strftime('%d/%m/%Y %H:%M')} | Año {ano1} vs {ano2}")
+st.caption(f"✅ Dashboard v3.1 CORREGIDO | {datetime.now().strftime('%d/%m/%Y %H:%M')} | Año {ano1} vs {ano2}")
