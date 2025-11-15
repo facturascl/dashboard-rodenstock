@@ -65,7 +65,7 @@ def get_comparativa_12_meses(ano):
 
 @st.cache_data(ttl=300)
 def get_subcategorias_completo_mes(ano, mes):
-    """Todas las subcategorías por mes: cantidad, costo, promedio, porcentaje - CORREGIDO"""
+    """Desglose por subcategoría - CORREGIDO: una factura = una sola vez"""
     query = f"""
     WITH facturas_clasif AS (
       SELECT
@@ -85,16 +85,27 @@ def get_subcategorias_completo_mes(ano, mes):
       INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
       WHERE f.fechaemision IS NOT NULL
     ),
+    facturas_unicas AS (
+      SELECT
+        numerofactura,
+        ano,
+        mes,
+        categoria,
+        MIN(subcategoria) AS subcategoria,
+        MAX(total_factura) AS total_factura
+      FROM facturas_clasif
+      GROUP BY numerofactura, ano, mes, categoria
+    ),
     resumen_categorias AS (
       SELECT
         ano,
         mes,
         categoria,
         subcategoria,
-        COUNT(DISTINCT numerofactura) AS cantidad_trabajos,
+        COUNT(*) AS cantidad_trabajos,
         SUM(total_factura) AS total_dinero,
         AVG(total_factura) AS promedio_trabajo
-      FROM facturas_clasif
+      FROM facturas_unicas
       WHERE ano = {ano} AND mes = {mes}
       GROUP BY categoria, subcategoria
     ),
@@ -139,16 +150,27 @@ def get_analisis_subcategorias_mes(ano, mes):
       INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
       WHERE f.fechaemision IS NOT NULL
     ),
+    facturas_unicas AS (
+      SELECT
+        numerofactura,
+        ano,
+        mes,
+        categoria,
+        MIN(subcategoria) AS subcategoria,
+        MAX(total_factura) AS total_factura
+      FROM facturas_clasif
+      GROUP BY numerofactura, ano, mes, categoria
+    ),
     resumen_categorias AS (
       SELECT
         ano,
         mes,
         categoria,
         subcategoria,
-        COUNT(DISTINCT numerofactura) AS cantidad_trabajos,
+        COUNT(*) AS cantidad_trabajos,
         SUM(total_factura) AS total_dinero,
         AVG(total_factura) AS promedio_trabajo
-      FROM facturas_clasif
+      FROM facturas_unicas
       WHERE ano = {ano} AND mes = {mes}
       GROUP BY categoria, subcategoria
     ),
@@ -173,7 +195,7 @@ def get_analisis_subcategorias_mes(ano, mes):
 
 @st.cache_data(ttl=300)
 def get_newton_rango(fecha_inicio, fecha_fin):
-    """Newton vs Newton Plus con rango de fechas: cantidad diaria y promedio diario - CORREGIDO"""
+    """Newton vs Newton Plus con rango de fechas"""
     query = f"""
     WITH newton_data AS (
       SELECT
@@ -589,4 +611,4 @@ with tab4:
 # PIE
 # ============================================================
 st.divider()
-st.caption(f"✅ Dashboard v4.1 CORREGIDO | {datetime.now().strftime('%d/%m/%Y %H:%M')} | Año {ano_actual}")
+st.caption(f"✅ Dashboard v5.0 CORREGIDO | {datetime.now().strftime('%d/%m/%Y %H:%M')} | Año {ano_actual}")
