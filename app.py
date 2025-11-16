@@ -172,7 +172,7 @@ def get_newton_rango(fecha_inicio, fecha_fin):
 
 @st.cache_data(ttl=300)
 def get_todas_facturas_detalle():
-    """Obtiene todas las facturas con sus líneas agregadas"""
+    """Obtiene todas las facturas con sus líneas agregadas - CORREGIDO"""
     query = """
     SELECT 
         f.numerofactura,
@@ -180,9 +180,9 @@ def get_todas_facturas_detalle():
         CAST(f.subtotal AS INTEGER) as subtotal,
         CAST(f.iva AS INTEGER) as iva,
         CAST(f.total AS INTEGER) as total,
-        f.cantidad_lineas,
-        GROUP_CONCAT(DISTINCT lf.clasificacion_categoria, ' | ') as categorias,
-        GROUP_CONCAT(DISTINCT lf.clasificacion_subcategoria, ' | ') as subcategorias
+        COUNT(DISTINCT lf.id) as cantidad_lineas,
+        GROUP_CONCAT(DISTINCT lf.clasificacion_categoria) as categorias,
+        GROUP_CONCAT(DISTINCT lf.clasificacion_subcategoria) as subcategorias
     FROM facturas f
     LEFT JOIN lineas_factura lf ON f.numerofactura = lf.numerofactura
     GROUP BY f.numerofactura
@@ -607,4 +607,4 @@ with tab4:
 # PIE DE PÁGINA
 # ============================================================
 st.divider()
-st.caption(f"✅ Dashboard v6.0 ACTUALIZADO | {datetime.now().strftime('%d/%m/%Y %H:%M')} | Año {ano_actual}")
+st.caption(f"✅ Dashboard v6.1 ACTUALIZADO | {datetime.now().strftime('%d/%m/%Y %H:%M')} | Año {ano_actual}")
