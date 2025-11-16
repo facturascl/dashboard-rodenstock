@@ -18,6 +18,16 @@ def get_db_connection():
         st.error(f"❌ Error BD: {e}")
         return None
 
+# ============================================================
+# BOTÓN PARA LIMPIAR CACHÉ Y FORZAR ACTUALIZACIÓN
+# ============================================================
+col_refresh, col_space = st.columns([1, 10])
+with col_refresh:
+    if st.button("🔄 Actualizar Datos", key="btn_refresh", help="Fuerza recarga de la BD"):
+        st.cache_resource.clear()
+        st.cache_data.clear()
+        st.rerun()
+
 conn = get_db_connection()
 if conn is None:
     st.stop()
@@ -129,71 +139,6 @@ def get_subcategorias_completo_mes(ano, mes):
     return pd.read_sql_query(query, conn)
 
 @st.cache_data(ttl=300)
-def get_analisis_subcategorias_mes(ano, mes):
-    """Análisis COMPLETO por subcategoría - CORREGIDO"""
-    query = f"""
-    WITH facturas_clasif AS (
-      SELECT
-        f.numerofactura,
-        CAST(STRFTIME('%Y', f.fechaemision) AS INTEGER) AS ano,
-        CAST(STRFTIME('%m', f.fechaemision) AS INTEGER) AS mes,
-        CASE 
-          WHEN lf.clasificacion_categoria IS NULL 
-               OR lf.clasificacion_categoria = 'Sin clasificacion' 
-               OR TRIM(lf.clasificacion_categoria) = ''
-            THEN 'Otros'
-          ELSE lf.clasificacion_categoria
-        END AS categoria,
-        COALESCE(lf.clasificacion_subcategoria, '') AS subcategoria,
-        COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0) AS total_factura
-      FROM lineas_factura lf
-      INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
-      WHERE f.fechaemision IS NOT NULL
-    ),
-    facturas_unicas AS (
-      SELECT
-        numerofactura,
-        ano,
-        mes,
-        categoria,
-        MIN(subcategoria) AS subcategoria,
-        MAX(total_factura) AS total_factura
-      FROM facturas_clasif
-      GROUP BY numerofactura, ano, mes, categoria
-    ),
-    resumen_categorias AS (
-      SELECT
-        ano,
-        mes,
-        categoria,
-        subcategoria,
-        COUNT(*) AS cantidad_trabajos,
-        SUM(total_factura) AS total_dinero,
-        AVG(total_factura) AS promedio_trabajo
-      FROM facturas_unicas
-      WHERE ano = {ano} AND mes = {mes}
-      GROUP BY categoria, subcategoria
-    ),
-    totales_mes AS (
-      SELECT
-        SUM(total_dinero) AS total_mes,
-        SUM(cantidad_trabajos) AS total_trabajos
-      FROM resumen_categorias
-    )
-    SELECT
-      rc.categoria,
-      rc.subcategoria,
-      rc.cantidad_trabajos AS cantidad,
-      CAST(rc.total_dinero AS INTEGER) AS total,
-      CAST(rc.promedio_trabajo AS INTEGER) AS promedio,
-      ROUND((rc.total_dinero / tm.total_mes) * 100, 2) AS pct
-    FROM resumen_categorias rc
-    CROSS JOIN totales_mes tm
-    ORDER BY rc.total_dinero DESC
-    """
-    return pd.read_sql_query(query, conn)
-
-@st.cache_data(ttl=300)
 def get_newton_rango(fecha_inicio, fecha_fin):
     """Newton vs Newton Plus con rango de fechas"""
     query = f"""
@@ -225,6 +170,26 @@ def get_newton_rango(fecha_inicio, fecha_fin):
     """
     return pd.read_sql_query(query, conn)
 
+@st.cache_data(ttl=300)
+def get_todas_facturas_detalle():
+    """Obtiene todas las facturas con sus líneas agregadas - CORREGIDO"""
+    query = """
+    SELECT 
+        f.numerofactura,
+        f.fechaemision,
+        CAST(f.subtotal AS INTEGER) as subtotal,
+        CAST(f.iva AS INTEGER) as iva,
+        CAST(f.total AS INTEGER) as total,
+        COUNT(DISTINCT lf.id) as cantidad_lineas,
+        GROUP_CONCAT(DISTINCT lf.clasificacion_categoria) as categorias,
+        GROUP_CONCAT(DISTINCT lf.clasificacion_subcategoria) as subcategorias
+    FROM facturas f
+    LEFT JOIN lineas_factura lf ON f.numerofactura = lf.numerofactura
+    GROUP BY f.numerofactura
+    ORDER BY f.fechaemision DESC, f.numerofactura DESC
+    """
+    return pd.read_sql_query(query, conn)
+
 # ============================================================
 # TABS PRINCIPALES
 # ============================================================
@@ -233,7 +198,7 @@ tab1, tab2, tab3, tab4 = st.tabs([
     "📊 Comparativa Anual",
     "🏷️ Desglose Subcategorías",
     "📈 Newton vs Plus",
-    "📍 Análisis Subcategorías"
+    "📋 Todas las Facturas"
 ])
 
 # ============================================================
@@ -482,7 +447,7 @@ with tab2:
             text=[f"{p:.1f}%" for p in df_subcat['pct']],
             textposition='outside',
             marker=dict(color=df_subcat['costo'], colorscale='Viridis'),
-            hovertemplate='<b>%{x}</b><br>Categoría: ' + df_subcat['categoria'].astype(str) + '<br>Cantidad: ' + df_subcat['cantidad'].astype(str) + '<br>Total: $%{y:,.0f}<br>Promedio: $' + df_subcat['promedio'].astype(str) + '<extra></extra>'
+            hovertemplate='<b>%{x}</b><br>Categoría: ' + df_subcat['categoria'].astype(str) + '<br>Cantidad: ' + df_subcat['cantidad'].astype(str) + '<br>Total: $%{y:,.0f}<extra></extra>'
         )])
         fig_bar.update_layout(xaxis_title="Subcategoría", yaxis_title="Total ($)", height=400)
         st.plotly_chart(fig_bar, use_container_width=True)
@@ -550,65 +515,96 @@ with tab3:
         st.info("ℹ️ Sin datos Newton/Newton Plus en este rango")
 
 # ============================================================
-# TAB 4: ANÁLISIS POR SUBCATEGORÍA
+# TAB 4: TODAS LAS FACTURAS (REEMPLAZA ANÁLISIS SUBCATEGORÍAS)
 # ============================================================
 with tab4:
-    st.header(f"📍 Análisis Completo por Subcategoría - Año {ano_actual}")
+    st.header(f"📋 Todas las Facturas - Detalle Completo")
     
-    col_mes, col_space = st.columns([2, 10])
-    with col_mes:
-        mes_tab4 = st.selectbox(
-            "📅 Mes",
-            range(1, 13),
-            index=0,
-            format_func=lambda x: meses_nombres[x-1],
-            key="tab4_mes"
-        )
+    df_facturas = get_todas_facturas_detalle()
     
-    df_subcat_full = get_analisis_subcategorias_mes(ano_actual, mes_tab4)
-    
-    if not df_subcat_full.empty:
-        col1, col2, col3 = st.columns(3)
+    if not df_facturas.empty:
+        # Estadísticas generales
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("Total Subcategorías", len(df_subcat_full))
+            st.metric("Total Facturas", f"{len(df_facturas):,}")
         with col2:
-            st.metric("Ingresos Totales", f"${df_subcat_full['total'].sum():,.0f}")
+            st.metric("Valor Total", f"${df_facturas['total'].sum():,.0f}")
         with col3:
-            st.metric("Total Trabajos", f"{df_subcat_full['cantidad'].sum()}")
+            st.metric("Promedio por Factura", f"${int(df_facturas['total'].mean()):,}")
+        with col4:
+            st.metric("Total IVA", f"${df_facturas['iva'].sum():,.0f}")
         
         st.divider()
         
-        st.subheader("Cantidad | Total | Promedio | Porcentaje")
+        # Filtros
+        col_fecha_inicio, col_fecha_fin, col_buscar = st.columns(3)
+        
+        with col_fecha_inicio:
+            fecha_min = st.date_input("📅 Desde", value=pd.to_datetime(df_facturas['fechaemision']).min(), key="tab4_fecha_min")
+        
+        with col_fecha_fin:
+            fecha_max = st.date_input("📅 Hasta", value=pd.to_datetime(df_facturas['fechaemision']).max(), key="tab4_fecha_max")
+        
+        with col_buscar:
+            buscar_factura = st.text_input("🔍 Buscar Factura #", key="tab4_buscar")
+        
+        # Filtrar datos
+        df_filtrado = df_facturas.copy()
+        df_filtrado['fechaemision'] = pd.to_datetime(df_filtrado['fechaemision'])
+        df_filtrado = df_filtrado[(df_filtrado['fechaemision'].dt.date >= fecha_min) & 
+                                   (df_filtrado['fechaemision'].dt.date <= fecha_max)]
+        
+        if buscar_factura:
+            df_filtrado = df_filtrado[df_filtrado['numerofactura'].str.contains(buscar_factura, case=False, na=False)]
+        
+        st.subheader(f"Resultados: {len(df_filtrado)} facturas")
+        
+        # Tabla interactiva
+        df_tabla = df_filtrado.copy()
+        df_tabla = df_tabla.rename(columns={
+            'numerofactura': 'Factura #',
+            'fechaemision': 'Fecha',
+            'subtotal': 'Subtotal',
+            'iva': 'IVA',
+            'total': 'Total',
+            'cantidad_lineas': 'Líneas',
+            'categorias': 'Categorías',
+            'subcategorias': 'Subcategorías'
+        })
+        
         st.dataframe(
-            df_subcat_full,
+            df_tabla,
             use_container_width=True,
             hide_index=True,
             column_config={
-                "categoria": st.column_config.TextColumn("Categoría", width=150),
-                "subcategoria": st.column_config.TextColumn("Subcategoría", width=220),
-                "cantidad": st.column_config.NumberColumn("Cantidad de Trabajos", width=130),
-                "total": st.column_config.NumberColumn("Total ($)", width=140, format="$%d"),
-                "promedio": st.column_config.NumberColumn("Promedio ($)", width=140, format="$%d"),
-                "pct": st.column_config.NumberColumn("% Total", width=110, format="%.2f%%"),
+                "Factura #": st.column_config.TextColumn("Factura #", width=120),
+                "Fecha": st.column_config.TextColumn("Fecha", width=100),
+                "Subtotal": st.column_config.NumberColumn("Subtotal ($)", width=120, format="$%d"),
+                "IVA": st.column_config.NumberColumn("IVA ($)", width=100, format="$%d"),
+                "Total": st.column_config.NumberColumn("Total ($)", width=120, format="$%d"),
+                "Líneas": st.column_config.NumberColumn("Líneas", width=80),
+                "Categorías": st.column_config.TextColumn("Categorías", width=200),
+                "Subcategorías": st.column_config.TextColumn("Subcategorías", width=200),
             }
         )
         
-        st.subheader("Distribución")
-        fig = go.Figure(data=[go.Bar(
-            x=df_subcat_full['subcategoria'],
-            y=df_subcat_full['total'],
-            text=[f"{p:.1f}%" for p in df_subcat_full['pct']],
-            textposition='outside',
-            marker=dict(color=df_subcat_full['total'], colorscale='Viridis'),
-            hovertemplate='<b>%{x}</b><br>Categoría: ' + df_subcat_full['categoria'].astype(str) + '<br>Cantidad: ' + df_subcat_full['cantidad'].astype(str) + '<br>Total: $%{y:,.0f}<extra></extra>'
-        )])
-        fig.update_layout(xaxis_title="Subcategoría", yaxis_title="Total ($)", height=400)
-        st.plotly_chart(fig, use_container_width=True)
+        # Resumen de filtrado
+        st.divider()
+        col_res1, col_res2, col_res3, col_res4 = st.columns(4)
+        with col_res1:
+            st.metric("Facturas Mostradas", f"{len(df_filtrado):,}")
+        with col_res2:
+            st.metric("Total Filtrado", f"${df_filtrado['total'].sum():,.0f}")
+        with col_res3:
+            st.metric("Promedio Filtrado", f"${int(df_filtrado['total'].mean()):,}")
+        with col_res4:
+            st.metric("IVA Filtrado", f"${df_filtrado['iva'].sum():,.0f}")
+        
     else:
-        st.info("ℹ️ Sin datos")
+        st.info("ℹ️ Sin facturas en la base de datos")
 
 # ============================================================
-# PIE
+# PIE DE PÁGINA
 # ============================================================
 st.divider()
-st.caption(f"✅ Dashboard v5.0 CORREGIDO | {datetime.now().strftime('%d/%m/%Y %H:%M')} | Año {ano_actual}")
+st.caption(f"✅ Dashboard v6.1 ACTUALIZADO | {datetime.now().strftime('%d/%m/%Y %H:%M')} | Año {ano_actual}")
