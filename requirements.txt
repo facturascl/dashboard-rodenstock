@@ -1,31 +1,5 @@
-# Core UI
 streamlit==1.28.1
-plotly==5.17.0
-
-# Data Processing
 pandas==2.3.3
+plotly==5.17.0
 numpy==2.0.2
 openpyxl==3.1.5
-
-# PDF Processing
-pdfplumber==0.11.8
-PyPDF2==3.0.1
-pdfminer.six==20251107
-pyparsing==3.2.5
-
-# Google Gmail API (sin BigQuery)
-google-auth==2.41.1
-google-auth-oauthlib==1.2.3
-google-auth-httplib2==0.2.1
-google-api-python-client==2.187.0
-
-# Security & Configuration
-python-dotenv==1.0.0
-
-# Supporting dependencies
-requests==2.32.5
-cryptography==46.0.3
-pyasn1==0.6.1
-rsa==4.9.1
-certifi==2025.11.12
-urllib3==2.5.0
