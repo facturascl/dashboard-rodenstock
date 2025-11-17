@@ -7,48 +7,11 @@ ENV/
 # Archivos de SO
 .DS_Store
 Thumbs.db
-*.swp
-*.swo
-*~
-
-# Python
+*.pyc
 __pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
 *.egg-info/
-dist/
-build/
 
 # IDE
 .vscode/
 .idea/
-*.sublime-workspace
-*.sublime-project
-
-# Datos sensibles (NUNCA SUBIR)
-.env
-.env.local
-credentials.json
-token.pickle
-*.key
-*.pem
-
-# Carpetas de procesamiento (SOLO LOCAL)
-pdfs_entrada/
-pdfs_procesados/
-*.pdf
-
-# Logs
-*.log
-logs/
-
-# Caché de Streamlit
-.streamlit/cache/
-
-# Archivos temporales
-*.tmp
-*.temp
-*.bak
-temp/
+*.swp
