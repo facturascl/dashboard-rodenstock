@@ -1,0 +1,185 @@
+a) Instalar Python
+Descarga e instala Python para Windows desde https://www.python.org/downloads/windows/
+
+Durante la instalación asegúrate de marcar la opción "Add Python to PATH" para que puedas usarlo desde la línea de comandos.
+
+b) Crear un ambiente virtual (opcional pero recomendado)
+Abre PowerShell o CMD y:
+
+cd <carpeta_donde_quieras_tu_proyecto>
+python -m venv venv
+venv\Scripts\activate
+
+Esto crea y activa un ambiente virtual para instalar tus dependencias ahí.
+
+c) Instalar las librerías necesarias
+Con el ambiente virtual activado, instala las librerías:
+
+pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib pdfplumber pandas
+
+2. Copiar el script y archivos necesarios
+Copia todo el contenido de tu proyecto (tu gmail_extract.py, credentials.json, y otros archivos) al servidor en una carpeta fija, p.ej. C:\Users\TuUsuario\Documents\Facturas\Perplexity
+
+En esa carpeta tendrás el ambiente virtual (o también puedes crearlo directamente ahí)
+
+3. Probar la ejecución manual
+Abre PowerShell o CMD, activa el ambiente, posiciona en la carpeta y ejecuta:
+
+cd C:\Users\TuUsuario\Documents\Facturas\Perplexity
+venv\Scripts\activate
+python gmail_extract.py
+
+4. Automatizar la ejecución con el Programador de Tareas de Windows
+a) Crear un archivo .bat para ejecutar el script
+Crea un archivo run_gmail_extract.bat con el siguiente contenido, ajustando rutas según tu instalación y proyecto:
+
+
+@echo off
+call C:\Users\TuUsuario\Documents\Facturas\Perplexity\venv\Scripts\activate.bat
+python C:\Users\TuUsuario\Documents\Facturas\Perplexity\gmail_extract.py >> C:\Users\TuUsuario\Documents\Facturas\Perplexity\log_gmail_extract.log 2>&1
+
+
+Este script activa el ambiente virtual y ejecuta Python con tu script, guardando logs.
+
+b) Crear una tarea programada
+Abre el Programador de tareas (Task Scheduler) en Windows.
+
+Crea una tarea básica:
+
+Nombre: "Ejecución gmail_extract"
+
+Desencadenadores (Triggers): Elige diario y configura para ejecutarse 1 o 2 veces al día a las horas que prefieras.
+
+Acción: Ejecutar un programa
+
+Programa/script: Apunta al archivo .bat que creaste (run_gmail_extract.bat)
+
+Configura la tarea para que se ejecute con los permisos más altos (opcional pero recomendable).
+
+Guarda la tarea.
+
+c) Probar manualmente la tarea desde el Programador para verificar que corre bien y registra log.
+5. Recomendaciones adicionales
+Asegúrate que el usuario que ejecuta la tarea programada tenga permisos para acceder a las carpetas y credenciales Google.
+
+Mantén actualizado tu credentials.json y el archivo token.json generado por la autenticación inicial.
+
+Revisa regularmente el archivo de log para detectar posibles errores.
+
+Configura notificaciones en el servidor o revisa logs programados para monitorear que todo funcione.
+
+
+Para tu archivo .bat que ejecute el script Python dentro de un ambiente virtual en Windows, lo más recomendable es que:
+
+Actives el entorno virtual dentro del script .bat.
+
+Luego ejecutes el script Python usando el python dentro del ambiente ya activado.
+
+De esta forma aseguras que se usan las librerías instaladas en el virtualenv.
+
+Ejemplo básico de contenido para tu archivo run_gmail_extract.bat:
+
+@echo off
+REM Activar el ambiente virtual
+call C:\Users\cris\Documents\Facturas\Perplexity\venv\Scripts\activate.bat
+
+REM Ejecutar el script Python
+python C:\Users\cris\Documents\Facturas\Perplexity\gmail_extract.py
+
+REM Desactivar el ambiente virtual (opcional)
+deactivate
+
+Pasos para usar el .bat:
+Asegúrate de que las rutas a activate.bat y al script .py sean las correctas para tu servidor o PC.
+
+Guarda el archivo .bat con ese contenido, por ejemplo: run_gmail_extract.bat
+
+Para probarlo haz doble clic en el .bat o ejecútalo desde CMD con:
+
+C:\ruta\a\run_gmail_extract.bat
+
+
+Guía para programar la tarea en Windows (Task Scheduler)
+1. Prepara tu archivo .bat
+Ya tienes el archivo .bat para ejecutar el script con el ambiente virtual activado, por ejemplo llamado run_gmail_extract.bat con este contenido (ajusta rutas a tu entorno):
+
+text
+@echo off
+call C:\Users\cris\Documents\Facturas\Perplexity\venv\Scripts\activate.bat
+python C:\Users\cris\Documents\Facturas\Perplexity\gmail_extract.py >> C:\Users\cris\Documents\Facturas\Perplexity\log_gmail_extract.log 2>&1
+Guárdalo y pruébalo para asegurarte que funciona correctamente haciendo doble clic o desde CMD.
+
+2. Abre el Programador de tareas (Task Scheduler)
+Haz clic en el botón Inicio.
+
+Escribe Programador de tareas o Task Scheduler y ábrelo.
+
+3. Crear una nueva tarea básica
+En el panel derecho, haz clic en Crear tarea básica...
+
+4. Nombre y descripción
+Pon un nombre, ejemplo: Ejecución gmail_extract.
+
+(Opcional) Agrega una descripción, por ejemplo: Ejecuta script para extraer facturas de Gmail.
+
+Da clic en Siguiente.
+
+5. Elegir desencadenador (Trigger)
+Selecciona Diariamente si quieres que se ejecute 1 o varias veces al día.
+
+Clic en Siguiente.
+
+6. Configurar hora y recurrencia
+Elige la fecha de inicio y la hora a la que quieres que primer lanzamiento (por ejemplo 08:00).
+
+Puedes poner que se repita cada 1 día.
+
+Clic en Siguiente.
+
+7. Acción a realizar
+Selecciona Iniciar un programa.
+
+Da clic en Siguiente.
+
+8. Configura el programa a ejecutar
+En Programa o script: busca el archivo .bat que creaste (run_gmail_extract.bat) o pon la ruta completa, por ejemplo:
+C:\Users\cris\Documents\Facturas\Perplexity\run_gmail_extract.bat
+
+Deja los campos Agregar argumentos y Iniciar en vacíos.
+
+Clic en Siguiente.
+
+9. Finalizar y confirmar
+Revisa el resumen.
+
+Marca la opción para abrir las propiedades si quieres configurar opciones avanzadas.
+
+Clic en Finalizar.
+
+10. Opcional: Configurar tareas para varias horas diarias
+Si quieres que se ejecute varias veces al día (por ejemplo, 8:00am, 2:00pm, 8:00pm), sigue estos pasos:
+
+En el Programador, busca tu tarea creada.
+
+Haz clic derecho y selecciona Propiedades.
+
+Abre la pestaña Desencadenadores (Triggers).
+
+Edita el desencadenador existente para que se repita cada 6 horas (o el intervalo deseado) durante un periodo de 1 día.
+
+O
+
+Añade desencadenadores nuevos con las horas específicas deseadas (por ejemplo, 8:00, 14:00 y 20:00).
+
+11. Probar la tarea programada
+Puedes hacer clic derecho en la tarea y seleccionar Ejecutar para probar que funcione correctamente.
+
+Luego revisa el archivo de log para confirmar que el script corrió sin errores.
+
+Consejos adicionales
+Revisa que tu usuario tenga permisos suficientes para ejecutar la tarea.
+
+Mantén abierto el archivo de log para monitorear ejecuciones.
+
+La PC debe estar encendida y el usuario debe estar logueado o activar la opción para ejecutar incluso si no está logueado (en Propiedades, General, configurar según convenga).
+

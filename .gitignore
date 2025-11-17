@@ -1,45 +1,54 @@
-<<<<<<< HEAD
+# Virtual Environment
+venv/
+env/
+ENV/
+.venv
 
-=======
->>>>>>> 54c3394 (Agregar guías de actualización de dashboard)
-# Credenciales (NUNCA subir)
-bigquery-credentials.json
-credentials.json
-token.json
-# ← ELIMINA la línea "*.json" (muy amplia)
-
-# Datos y outputs
-outputs/
-pdf_attachments/
-processed_messages.json
-recambio.json
-last_processed.txt
-environment.txt
-Migrar.txt
-libreria.xlsx
-*.log
-
-# Scripts de procesamiento (no necesarios para dashboard)
-20copy.py
+# Archivos de SO
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
 
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
-venv/
-.venv/
-env/
+*.so
+.Python
+*.egg-info/
+dist/
+build/
 
-# Google Cloud SDK
-Rodenstock/
+# IDE
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
 
-# Streamlit
-.streamlit/secrets.toml
+# Datos sensibles (NUNCA SUBIR)
+.env
+.env.local
+credentials.json
+token.pickle
+*.key
+*.pem
 
-# Mac
-.DS_Store
+# Carpetas de procesamiento (SOLO LOCAL)
+pdfs_entrada/
+pdfs_procesados/
+*.pdf
 
-facturas.db
-   __pycache__/
-   *.pyc
-   .streamlit/
+# Logs
+*.log
+logs/
+
+# Caché de Streamlit
+.streamlit/cache/
+
+# Archivos temporales
+*.tmp
+*.temp
+*.bak
+temp/
