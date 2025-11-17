@@ -39,12 +39,7 @@ Rodenstock/
 # Mac
 .DS_Store
 
-<<<<<<< HEAD
 facturas.db
    __pycache__/
    *.pyc
    .streamlit/
-=======
-# DATABASE - NUNCA versionar
-facturas.db
->>>>>>> 54c3394 (Agregar guías de actualización de dashboard)
