@@ -1,57 +1,31 @@
-cachetools==6.2.2
-certifi==2025.11.12
-cffi==2.0.0
-charset-normalizer==3.4.4
-cryptography==46.0.3
-et_xmlfile==2.0.0
-google-api-core==2.28.1
-google-api-python-client==2.187.0
-google-auth==2.41.1
-google-auth-httplib2==0.2.1
-google-auth-oauthlib==1.2.3
-google-cloud-bigquery==3.38.0
-google-cloud-core==2.5.0
-google-cloud-storage==3.5.0
-google-crc32c==1.7.1
-google-resumable-media==2.7.2
-googleapis-common-protos==1.72.0
-grpcio==1.76.0
-grpcio-status==1.76.0
-httplib2==0.31.0
-idna==3.11
-importlib_metadata==8.7.0
-numpy==2.0.2
-oauthlib==3.3.1
-openpyxl==3.1.5
-packaging==25.0
-pandas==2.3.3
-pdfminer.six==20251107
-pdfplumber==0.11.8
-pillow==11.3.0
-proto-plus==1.26.1
-protobuf==6.33.1
-pyasn1==0.6.1
-pyasn1_modules==0.4.2
-pycparser==2.23
-pyparsing==3.2.5
-PyPDF2==3.0.1
-pypdfium2==5.0.0
-python-dateutil==2.9.0.post0
-pytz==2025.2
-requests==2.32.5
-requests-oauthlib==2.0.0
-rsa==4.9.1
-six==1.17.0
-typing_extensions==4.15.0
-tzdata==2025.2
-uritemplate==4.2.0
-urllib3==2.5.0
-zipp==3.23.0
+# Core UI
 streamlit==1.28.1
 plotly==5.17.0
-google-auth-oauthlib==1.1.0
-google-auth-httplib2==0.2.0
-google-api-python-client==2.100.0
-python-dotenv==1.0.0
-openpyxl==3.1.2
 
+# Data Processing
+pandas==2.3.3
+numpy==2.0.2
+openpyxl==3.1.5
+
+# PDF Processing
+pdfplumber==0.11.8
+PyPDF2==3.0.1
+pdfminer.six==20251107
+pyparsing==3.2.5
+
+# Google Gmail API (sin BigQuery)
+google-auth==2.41.1
+google-auth-oauthlib==1.2.3
+google-auth-httplib2==0.2.1
+google-api-python-client==2.187.0
+
+# Security & Configuration
+python-dotenv==1.0.0
+
+# Supporting dependencies
+requests==2.32.5
+cryptography==46.0.3
+pyasn1==0.6.1
+rsa==4.9.1
+certifi==2025.11.12
+urllib3==2.5.0
