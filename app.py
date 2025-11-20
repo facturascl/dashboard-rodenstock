@@ -607,4 +607,4 @@ with tab4:
 # PIE DE PÁGINA
 # ============================================================
 st.divider()
-st.caption(f"✅ Dashboard Ben&Frank | Rodenstock | {datetime.now().strftime('%d/%m/%Y %H:%M')} | Año {ano_actual}" | Cristián Ibañez)
+st.caption(f"✅ Dashboard Ben&Frank | Rodenstock | Cristián Ibañez | {datetime.now().strftime('%d/%m/%Y %H:%M')} | Año {ano_actual}")
