@@ -75,7 +75,7 @@ def get_comparativa_12_meses(ano):
 
 @st.cache_data(ttl=300)
 def get_subcategorias_completo_mes(ano, mes):
-    """Desglose por subcategoría - CORREGIDO: una factura = una sola vez"""
+    """Desglose por subcategoría - una factura = una sola vez"""
     query = f"""
     WITH facturas_clasif AS (
       SELECT
@@ -170,46 +170,25 @@ def get_newton_rango(fecha_inicio, fecha_fin):
     """
     return pd.read_sql_query(query, conn)
 
-@st.cache_data(ttl=300)
-def get_todas_facturas_detalle():
-    """Obtiene todas las facturas con sus líneas agregadas - CORREGIDO"""
-    query = """
-    SELECT 
-        f.numerofactura,
-        f.fechaemision,
-        CAST(f.subtotal AS INTEGER) as subtotal,
-        CAST(f.iva AS INTEGER) as iva,
-        CAST(f.total AS INTEGER) as total,
-        COUNT(DISTINCT lf.id) as cantidad_lineas,
-        GROUP_CONCAT(DISTINCT lf.clasificacion_categoria) as categorias,
-        GROUP_CONCAT(DISTINCT lf.clasificacion_subcategoria) as subcategorias
-    FROM facturas f
-    LEFT JOIN lineas_factura lf ON f.numerofactura = lf.numerofactura
-    GROUP BY f.numerofactura
-    ORDER BY f.fechaemision DESC, f.numerofactura DESC
-    """
-    return pd.read_sql_query(query, conn)
-
 # ============================================================
-# TABS PRINCIPALES
+# TABS PRINCIPALES (sin “Todas las Facturas”)
 # ============================================================
-
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2, tab3 = st.tabs([
     "📊 Comparativa Anual",
     "🏷️ Desglose Subcategorías",
-    "📈 Newton vs Plus",
-    "📋 Todas las Facturas"
+    "📈 Newton vs Plus"
 ])
 
 # ============================================================
-# TAB 1: COMPARATIVA ANUAL (12 MESES) - REORGANIZADO
+# TAB 1: COMPARATIVA ANUAL (12 MESES)
 # ============================================================
 with tab1:
     st.header(f"📊 Comparativa de Años")
     
-    meses_nombres = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
+    meses_nombres = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun',
+                     'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
     
-    # PARTE 1: AÑO ACTUAL (ARRIBA, COMPLETO)
+    # PARTE 1: AÑO ACTUAL
     st.subheader(f"📅 Año {ano_actual} - Vista Actual")
     
     df_comp_actual = get_comparativa_12_meses(ano_actual)
@@ -217,7 +196,14 @@ with tab1:
     df_comp_actual_full = df_comp_actual_full.merge(df_comp_actual, on='mes', how='left').fillna(0)
     df_comp_actual_full['cantidad_facturas'] = df_comp_actual_full['cantidad_facturas'].astype(int)
     df_comp_actual_full['total_dinero'] = df_comp_actual_full['total_dinero'].astype(int)
-    df_comp_actual_full['promedio'] = (df_comp_actual_full['total_dinero'] / df_comp_actual_full['cantidad_facturas'].replace(0, 1)).fillna(0).astype(int)
+    df_comp_actual_full['promedio'] = (
+        df_comp_actual_full['total_dinero'] /
+        df_comp_actual_full['cantidad_facturas'].replace(0, 1)
+    ).fillna(0).astype(int)
+    
+    # Promedio mensual de facturación del año (línea horizontal)
+    promedio_mensual_actual = df_comp_actual_full['total_dinero'].mean()
+    df_comp_actual_full['promedio_mensual_ano'] = promedio_mensual_actual
     
     fig_actual = go.Figure()
     fig_actual.add_trace(go.Bar(
@@ -235,6 +221,15 @@ with tab1:
         mode='lines+markers',
         line=dict(color='#FF6B6B', width=3),
         marker=dict(size=10)
+    ))
+    # Línea de promedio mensual del año
+    fig_actual.add_trace(go.Scatter(
+        x=[meses_nombres[i-1] for i in df_comp_actual_full['mes']],
+        y=df_comp_actual_full['promedio_mensual_ano'],
+        name='Promedio Mensual Año ($)',
+        yaxis='y2',
+        mode='lines',
+        line=dict(color='rgba(0,0,0,0.6)', width=2, dash='dash')
     ))
     fig_actual.update_layout(
         xaxis_title="Mes",
@@ -260,7 +255,7 @@ with tab1:
         }
     )
     
-    # PARTE 2: COMPARATIVA (ABAJO, LADO A LADO)
+    # PARTE 2: COMPARATIVA ENTRE AÑOS
     st.divider()
     st.subheader("🔄 Comparativa entre Años (Lado a Lado)")
     
@@ -268,25 +263,37 @@ with tab1:
     with col_ano1:
         ano_comp1 = st.selectbox("📅 Año 1", anos_disponibles, index=0, key="ano_comp1")
     with col_ano2:
-        ano_comp2 = st.selectbox("📅 Año 2", anos_disponibles, index=min(1, len(anos_disponibles)-1), key="ano_comp2")
+        ano_comp2 = st.selectbox("📅 Año 2", anos_disponibles,
+                                 index=min(1, len(anos_disponibles)-1), key="ano_comp2")
     
-    # Obtener datos de ambos años
+    # Año 1
     df_comp1 = get_comparativa_12_meses(ano_comp1)
     df_comp1_full = pd.DataFrame({'mes': range(1, 13)})
     df_comp1_full = df_comp1_full.merge(df_comp1, on='mes', how='left').fillna(0)
     df_comp1_full['cantidad_facturas'] = df_comp1_full['cantidad_facturas'].astype(int)
     df_comp1_full['total_dinero'] = df_comp1_full['total_dinero'].astype(int)
-    df_comp1_full['promedio'] = (df_comp1_full['total_dinero'] / df_comp1_full['cantidad_facturas'].replace(0, 1)).fillna(0).astype(int)
+    df_comp1_full['promedio'] = (
+        df_comp1_full['total_dinero'] /
+        df_comp1_full['cantidad_facturas'].replace(0, 1)
+    ).fillna(0).astype(int)
+    promedio_mensual_ano1 = df_comp1_full['total_dinero'].mean()
+    df_comp1_full['promedio_mensual_ano'] = promedio_mensual_ano1
     
+    # Año 2
     df_comp2 = get_comparativa_12_meses(ano_comp2) if ano_comp1 != ano_comp2 else pd.DataFrame()
     if not df_comp2.empty:
         df_comp2_full = pd.DataFrame({'mes': range(1, 13)})
         df_comp2_full = df_comp2_full.merge(df_comp2, on='mes', how='left').fillna(0)
         df_comp2_full['cantidad_facturas'] = df_comp2_full['cantidad_facturas'].astype(int)
         df_comp2_full['total_dinero'] = df_comp2_full['total_dinero'].astype(int)
-        df_comp2_full['promedio'] = (df_comp2_full['total_dinero'] / df_comp2_full['cantidad_facturas'].replace(0, 1)).fillna(0).astype(int)
+        df_comp2_full['promedio'] = (
+            df_comp2_full['total_dinero'] /
+            df_comp2_full['cantidad_facturas'].replace(0, 1)
+        ).fillna(0).astype(int)
+        promedio_mensual_ano2 = df_comp2_full['total_dinero'].mean()
+        df_comp2_full['promedio_mensual_ano'] = promedio_mensual_ano2
     
-    # Gráficos LADO A LADO
+    # Gráficos lado a lado
     col_graf1, col_graf2 = st.columns(2)
     
     with col_graf1:
@@ -307,6 +314,14 @@ with tab1:
             mode='lines+markers',
             line=dict(color='#FF6B6B', width=3),
             marker=dict(size=10)
+        ))
+        fig1.add_trace(go.Scatter(
+            x=[meses_nombres[i-1] for i in df_comp1_full['mes']],
+            y=df_comp1_full['promedio_mensual_ano'],
+            name='Promedio Mensual Año ($)',
+            yaxis='y2',
+            mode='lines',
+            line=dict(color='rgba(0,0,0,0.6)', width=2, dash='dash')
         ))
         fig1.update_layout(
             xaxis_title="Mes",
@@ -338,6 +353,14 @@ with tab1:
                 line=dict(color='#FFC107', width=3),
                 marker=dict(size=10)
             ))
+            fig2.add_trace(go.Scatter(
+                x=[meses_nombres[i-1] for i in df_comp2_full['mes']],
+                y=df_comp2_full['promedio_mensual_ano'],
+                name='Promedio Mensual Año ($)',
+                yaxis='y2',
+                mode='lines',
+                line=dict(color='rgba(0,0,0,0.6)', width=2, dash='dash')
+            ))
             fig2.update_layout(
                 xaxis_title="Mes",
                 yaxis=dict(title="Facturas", side='left'),
@@ -348,7 +371,7 @@ with tab1:
             )
             st.plotly_chart(fig2, use_container_width=True)
     
-    # Tablas LADO A LADO
+    # Tablas lado a lado
     st.subheader("Tablas Comparativas")
     col_tab1, col_tab2 = st.columns(2)
     
@@ -447,7 +470,9 @@ with tab2:
             text=[f"{p:.1f}%" for p in df_subcat['pct']],
             textposition='outside',
             marker=dict(color=df_subcat['costo'], colorscale='Viridis'),
-            hovertemplate='<b>%{x}</b><br>Categoría: ' + df_subcat['categoria'].astype(str) + '<br>Cantidad: ' + df_subcat['cantidad'].astype(str) + '<br>Total: $%{y:,.0f}<extra></extra>'
+            hovertemplate='<b>%{x}</b><br>Categoría: ' + df_subcat['categoria'].astype(str) +
+                          '<br>Cantidad: ' + df_subcat['cantidad'].astype(str) +
+                          '<br>Total: $%{y:,.0f}<extra></extra>'
         )])
         fig_bar.update_layout(xaxis_title="Subcategoría", yaxis_title="Total ($)", height=400)
         st.plotly_chart(fig_bar, use_container_width=True)
@@ -462,18 +487,25 @@ with tab3:
     
     col1, col2 = st.columns(2)
     with col1:
-        fecha_inicio = st.date_input("📅 Fecha Inicio", value=pd.to_datetime(f"{ano_actual}-01-01"), key="newton_inicio")
+        fecha_inicio = st.date_input("📅 Fecha Inicio",
+                                     value=pd.to_datetime(f"{ano_actual}-01-01"),
+                                     key="newton_inicio")
     with col2:
-        fecha_fin = st.date_input("📅 Fecha Fin", value=pd.to_datetime(f"{ano_actual}-12-31"), key="newton_fin")
+        fecha_fin = st.date_input("📅 Fecha Fin",
+                                  value=pd.to_datetime(f"{ano_actual}-12-31"),
+                                  key="newton_fin")
     
-    df_newton = get_newton_rango(fecha_inicio.strftime('%Y-%m-%d'), fecha_fin.strftime('%Y-%m-%d'))
+    df_newton = get_newton_rango(fecha_inicio.strftime('%Y-%m-%d'),
+                                 fecha_fin.strftime('%Y-%m-%d'))
     
     if not df_newton.empty:
         df_newton_pivot_cant = df_newton.pivot_table(
-            index='fecha', columns='tipo', values='cantidad', aggfunc='sum', fill_value=0
+            index='fecha', columns='tipo', values='cantidad',
+            aggfunc='sum', fill_value=0
         )
         df_newton_pivot_prom = df_newton.pivot_table(
-            index='fecha', columns='tipo', values='promedio_diario', aggfunc='first', fill_value=0
+            index='fecha', columns='tipo', values='promedio_diario',
+            aggfunc='first', fill_value=0
         )
         
         fig = go.Figure()
@@ -486,10 +518,11 @@ with tab3:
                 name=f"{col} (Cantidad)",
                 yaxis='y1',
                 opacity=0.7,
-                hovertemplate='<b>%{x}</b><br>' + col + ' Cantidad: %{y}<extra></extra>'
+                hovertemplate='<b>%{x}</b><br>' + col +
+                              ' Cantidad: %{y}<extra></extra>'
             ))
         
-        # Líneas para promedio DIARIO
+        # Líneas para promedio diario
         for col in df_newton_pivot_prom.columns:
             fig.add_trace(go.Scatter(
                 x=df_newton_pivot_prom.index,
@@ -498,7 +531,8 @@ with tab3:
                 yaxis='y2',
                 mode='lines+markers',
                 line=dict(width=2),
-                hovertemplate='<b>%{x}</b><br>' + col + ' Promedio Diario: $%{y:,.0f}<extra></extra>'
+                hovertemplate='<b>%{x}</b><br>' + col +
+                              ' Promedio Diario: $%{y:,.0f}<extra></extra>'
             ))
         
         fig.update_layout(
@@ -515,96 +549,10 @@ with tab3:
         st.info("ℹ️ Sin datos Newton/Newton Plus en este rango")
 
 # ============================================================
-# TAB 4: TODAS LAS FACTURAS (REEMPLAZA ANÁLISIS SUBCATEGORÍAS)
-# ============================================================
-with tab4:
-    st.header(f"📋 Todas las Facturas - Detalle Completo")
-    
-    df_facturas = get_todas_facturas_detalle()
-    
-    if not df_facturas.empty:
-        # Estadísticas generales
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Total Facturas", f"{len(df_facturas):,}")
-        with col2:
-            st.metric("Valor Total", f"${df_facturas['total'].sum():,.0f}")
-        with col3:
-            st.metric("Promedio por Factura", f"${int(df_facturas['total'].mean()):,}")
-        with col4:
-            st.metric("Total IVA", f"${df_facturas['iva'].sum():,.0f}")
-        
-        st.divider()
-        
-        # Filtros
-        col_fecha_inicio, col_fecha_fin, col_buscar = st.columns(3)
-        
-        with col_fecha_inicio:
-            fecha_min = st.date_input("📅 Desde", value=pd.to_datetime(df_facturas['fechaemision']).min(), key="tab4_fecha_min")
-        
-        with col_fecha_fin:
-            fecha_max = st.date_input("📅 Hasta", value=pd.to_datetime(df_facturas['fechaemision']).max(), key="tab4_fecha_max")
-        
-        with col_buscar:
-            buscar_factura = st.text_input("🔍 Buscar Factura #", key="tab4_buscar")
-        
-        # Filtrar datos
-        df_filtrado = df_facturas.copy()
-        df_filtrado['fechaemision'] = pd.to_datetime(df_filtrado['fechaemision'])
-        df_filtrado = df_filtrado[(df_filtrado['fechaemision'].dt.date >= fecha_min) & 
-                                   (df_filtrado['fechaemision'].dt.date <= fecha_max)]
-        
-        if buscar_factura:
-            df_filtrado = df_filtrado[df_filtrado['numerofactura'].str.contains(buscar_factura, case=False, na=False)]
-        
-        st.subheader(f"Resultados: {len(df_filtrado)} facturas")
-        
-        # Tabla interactiva
-        df_tabla = df_filtrado.copy()
-        df_tabla = df_tabla.rename(columns={
-            'numerofactura': 'Factura #',
-            'fechaemision': 'Fecha',
-            'subtotal': 'Subtotal',
-            'iva': 'IVA',
-            'total': 'Total',
-            'cantidad_lineas': 'Líneas',
-            'categorias': 'Categorías',
-            'subcategorias': 'Subcategorías'
-        })
-        
-        st.dataframe(
-            df_tabla,
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Factura #": st.column_config.TextColumn("Factura #", width=120),
-                "Fecha": st.column_config.TextColumn("Fecha", width=100),
-                "Subtotal": st.column_config.NumberColumn("Subtotal ($)", width=120, format="$%d"),
-                "IVA": st.column_config.NumberColumn("IVA ($)", width=100, format="$%d"),
-                "Total": st.column_config.NumberColumn("Total ($)", width=120, format="$%d"),
-                "Líneas": st.column_config.NumberColumn("Líneas", width=80),
-                "Categorías": st.column_config.TextColumn("Categorías", width=200),
-                "Subcategorías": st.column_config.TextColumn("Subcategorías", width=200),
-            }
-        )
-        
-        # Resumen de filtrado
-        st.divider()
-        col_res1, col_res2, col_res3, col_res4 = st.columns(4)
-        with col_res1:
-            st.metric("Facturas Mostradas", f"{len(df_filtrado):,}")
-        with col_res2:
-            st.metric("Total Filtrado", f"${df_filtrado['total'].sum():,.0f}")
-        with col_res3:
-            st.metric("Promedio Filtrado", f"${int(df_filtrado['total'].mean()):,}")
-        with col_res4:
-            st.metric("IVA Filtrado", f"${df_filtrado['iva'].sum():,.0f}")
-        
-    else:
-        st.info("ℹ️ Sin facturas en la base de datos")
-
-# ============================================================
 # PIE DE PÁGINA
 # ============================================================
 st.divider()
-st.caption(f"✅ Dashboard Ben&Frank | Rodenstock | Cristián Ibañez | {datetime.now().strftime('%d/%m/%Y %H:%M')} | Año {ano_actual}")
+st.caption(
+    f"✅ Dashboard Ben&Frank | Rodenstock | Cristián Ibañez | "
+    f"{datetime.now().strftime('%d/%m/%Y %H:%M')} | Año {ano_actual}"
+)
