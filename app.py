@@ -171,7 +171,7 @@ def get_newton_rango(fecha_inicio, fecha_fin):
     return pd.read_sql_query(query, conn)
 
 # ============================================================
-# TABS PRINCIPALES (sin “Todas las Facturas”)
+# TABS PRINCIPALES
 # ============================================================
 tab1, tab2, tab3 = st.tabs([
     "📊 Comparativa Anual",
@@ -201,9 +201,11 @@ with tab1:
         df_comp_actual_full['cantidad_facturas'].replace(0, 1)
     ).fillna(0).astype(int)
     
-    # Promedio mensual de facturación del año (línea horizontal)
-    promedio_mensual_actual = df_comp_actual_full['total_dinero'].mean()
-    df_comp_actual_full['promedio_mensual_ano'] = promedio_mensual_actual
+    # Promedio mensual acumulado (Ene, Ene–Feb, Ene–Mar, ...)
+    df_comp_actual_full = df_comp_actual_full.sort_values('mes')
+    df_comp_actual_full['promedio_mensual_ano'] = (
+        df_comp_actual_full['total_dinero'].expanding().mean()
+    )
     
     fig_actual = go.Figure()
     fig_actual.add_trace(go.Bar(
@@ -222,11 +224,11 @@ with tab1:
         line=dict(color='#FF6B6B', width=3),
         marker=dict(size=10)
     ))
-    # Línea de promedio mensual del año
+    # Línea de promedio mensual acumulado del año
     fig_actual.add_trace(go.Scatter(
         x=[meses_nombres[i-1] for i in df_comp_actual_full['mes']],
         y=df_comp_actual_full['promedio_mensual_ano'],
-        name='Promedio Mensual Año ($)',
+        name='Promedio Mensual Acum. ($)',
         yaxis='y2',
         mode='lines',
         line=dict(color='rgba(0,0,0,0.6)', width=2, dash='dash')
@@ -276,8 +278,10 @@ with tab1:
         df_comp1_full['total_dinero'] /
         df_comp1_full['cantidad_facturas'].replace(0, 1)
     ).fillna(0).astype(int)
-    promedio_mensual_ano1 = df_comp1_full['total_dinero'].mean()
-    df_comp1_full['promedio_mensual_ano'] = promedio_mensual_ano1
+    df_comp1_full = df_comp1_full.sort_values('mes')
+    df_comp1_full['promedio_mensual_ano'] = (
+        df_comp1_full['total_dinero'].expanding().mean()
+    )
     
     # Año 2
     df_comp2 = get_comparativa_12_meses(ano_comp2) if ano_comp1 != ano_comp2 else pd.DataFrame()
@@ -290,8 +294,10 @@ with tab1:
             df_comp2_full['total_dinero'] /
             df_comp2_full['cantidad_facturas'].replace(0, 1)
         ).fillna(0).astype(int)
-        promedio_mensual_ano2 = df_comp2_full['total_dinero'].mean()
-        df_comp2_full['promedio_mensual_ano'] = promedio_mensual_ano2
+        df_comp2_full = df_comp2_full.sort_values('mes')
+        df_comp2_full['promedio_mensual_ano'] = (
+            df_comp2_full['total_dinero'].expanding().mean()
+        )
     
     # Gráficos lado a lado
     col_graf1, col_graf2 = st.columns(2)
@@ -318,7 +324,7 @@ with tab1:
         fig1.add_trace(go.Scatter(
             x=[meses_nombres[i-1] for i in df_comp1_full['mes']],
             y=df_comp1_full['promedio_mensual_ano'],
-            name='Promedio Mensual Año ($)',
+            name='Promedio Mensual Acum. ($)',
             yaxis='y2',
             mode='lines',
             line=dict(color='rgba(0,0,0,0.6)', width=2, dash='dash')
@@ -356,7 +362,7 @@ with tab1:
             fig2.add_trace(go.Scatter(
                 x=[meses_nombres[i-1] for i in df_comp2_full['mes']],
                 y=df_comp2_full['promedio_mensual_ano'],
-                name='Promedio Mensual Año ($)',
+                name='Promedio Mensual Acum. ($)',
                 yaxis='y2',
                 mode='lines',
                 line=dict(color='rgba(0,0,0,0.6)', width=2, dash='dash')
