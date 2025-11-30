@@ -59,7 +59,7 @@ except Exception as e:
 
 @st.cache_data(ttl=300)
 def get_comparativa_12_meses(ano):
-    """Comparativa de 12 meses: cantidad de facturas + línea de dinero"""
+    """Comparativa de 12 meses: cantidad de facturas + línea de dinero."""
     query = f"""
     SELECT 
         CAST(STRFTIME('%m', fechaemision) AS INTEGER) as mes,
@@ -75,7 +75,7 @@ def get_comparativa_12_meses(ano):
 
 @st.cache_data(ttl=300)
 def get_subcategorias_completo_mes(ano, mes):
-    """Desglose por subcategoría - una factura = una sola vez"""
+    """Desglose por subcategoría - una factura = una sola vez."""
     query = f"""
     WITH facturas_clasif AS (
       SELECT
@@ -140,7 +140,7 @@ def get_subcategorias_completo_mes(ano, mes):
 
 @st.cache_data(ttl=300)
 def get_newton_rango(fecha_inicio, fecha_fin):
-    """Newton vs Newton Plus con rango de fechas"""
+    """Newton vs Newton Plus con rango de fechas."""
     query = f"""
     WITH newton_data AS (
       SELECT
@@ -183,7 +183,7 @@ tab1, tab2, tab3 = st.tabs([
 # TAB 1: COMPARATIVA ANUAL (12 MESES)
 # ============================================================
 with tab1:
-    st.header(f"📊 Comparativa de Años")
+    st.header("📊 Comparativa de Años")
     
     meses_nombres = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun',
                      'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
@@ -200,12 +200,6 @@ with tab1:
         df_comp_actual_full['total_dinero'] /
         df_comp_actual_full['cantidad_facturas'].replace(0, 1)
     ).fillna(0).astype(int)
-    
-    # Promedio mensual acumulado (Ene, Ene–Feb, Ene–Mar, ...)
-    df_comp_actual_full = df_comp_actual_full.sort_values('mes')
-    df_comp_actual_full['promedio_mensual_ano'] = (
-        df_comp_actual_full['total_dinero'].expanding().mean()
-    )
     
     fig_actual = go.Figure()
     fig_actual.add_trace(go.Bar(
@@ -224,11 +218,11 @@ with tab1:
         line=dict(color='#FF6B6B', width=3),
         marker=dict(size=10)
     ))
-    # Línea de promedio mensual acumulado del año
+    # Línea de promedio mensual por factura
     fig_actual.add_trace(go.Scatter(
         x=[meses_nombres[i-1] for i in df_comp_actual_full['mes']],
-        y=df_comp_actual_full['promedio_mensual_ano'],
-        name='Promedio Mensual Acum. ($)',
+        y=df_comp_actual_full['promedio'],
+        name='Promedio Mensual por Factura ($)',
         yaxis='y2',
         mode='lines',
         line=dict(color='rgba(0,0,0,0.6)', width=2, dash='dash')
@@ -236,7 +230,7 @@ with tab1:
     fig_actual.update_layout(
         xaxis_title="Mes",
         yaxis=dict(title="Cantidad de Facturas", side='left'),
-        yaxis2=dict(title="Total ($)", overlaying='y', side='right'),
+        yaxis2=dict(title="Total / Promedio ($)", overlaying='y', side='right'),
         hovermode='x unified',
         height=400,
         showlegend=True
@@ -278,10 +272,6 @@ with tab1:
         df_comp1_full['total_dinero'] /
         df_comp1_full['cantidad_facturas'].replace(0, 1)
     ).fillna(0).astype(int)
-    df_comp1_full = df_comp1_full.sort_values('mes')
-    df_comp1_full['promedio_mensual_ano'] = (
-        df_comp1_full['total_dinero'].expanding().mean()
-    )
     
     # Año 2
     df_comp2 = get_comparativa_12_meses(ano_comp2) if ano_comp1 != ano_comp2 else pd.DataFrame()
@@ -294,10 +284,6 @@ with tab1:
             df_comp2_full['total_dinero'] /
             df_comp2_full['cantidad_facturas'].replace(0, 1)
         ).fillna(0).astype(int)
-        df_comp2_full = df_comp2_full.sort_values('mes')
-        df_comp2_full['promedio_mensual_ano'] = (
-            df_comp2_full['total_dinero'].expanding().mean()
-        )
     
     # Gráficos lado a lado
     col_graf1, col_graf2 = st.columns(2)
@@ -323,8 +309,8 @@ with tab1:
         ))
         fig1.add_trace(go.Scatter(
             x=[meses_nombres[i-1] for i in df_comp1_full['mes']],
-            y=df_comp1_full['promedio_mensual_ano'],
-            name='Promedio Mensual Acum. ($)',
+            y=df_comp1_full['promedio'],
+            name='Promedio Mensual por Factura ($)',
             yaxis='y2',
             mode='lines',
             line=dict(color='rgba(0,0,0,0.6)', width=2, dash='dash')
@@ -332,7 +318,7 @@ with tab1:
         fig1.update_layout(
             xaxis_title="Mes",
             yaxis=dict(title="Facturas", side='left'),
-            yaxis2=dict(title="Total ($)", overlaying='y', side='right'),
+            yaxis2=dict(title="Total / Promedio ($)", overlaying='y', side='right'),
             hovermode='x unified',
             height=400,
             showlegend=True
@@ -361,8 +347,8 @@ with tab1:
             ))
             fig2.add_trace(go.Scatter(
                 x=[meses_nombres[i-1] for i in df_comp2_full['mes']],
-                y=df_comp2_full['promedio_mensual_ano'],
-                name='Promedio Mensual Acum. ($)',
+                y=df_comp2_full['promedio'],
+                name='Promedio Mensual por Factura ($)',
                 yaxis='y2',
                 mode='lines',
                 line=dict(color='rgba(0,0,0,0.6)', width=2, dash='dash')
@@ -370,7 +356,7 @@ with tab1:
             fig2.update_layout(
                 xaxis_title="Mes",
                 yaxis=dict(title="Facturas", side='left'),
-                yaxis2=dict(title="Total ($)", overlaying='y', side='right'),
+                yaxis2=dict(title="Total / Promedio ($)", overlaying='y', side='right'),
                 hovermode='x unified',
                 height=400,
                 showlegend=True
@@ -489,20 +475,26 @@ with tab2:
 # TAB 3: NEWTON VS NEWTON PLUS
 # ============================================================
 with tab3:
-    st.header(f"📈 Newton vs Newton Plus")
+    st.header("📈 Newton vs Newton Plus")
     
     col1, col2 = st.columns(2)
     with col1:
-        fecha_inicio = st.date_input("📅 Fecha Inicio",
-                                     value=pd.to_datetime(f"{ano_actual}-01-01"),
-                                     key="newton_inicio")
+        fecha_inicio = st.date_input(
+            "📅 Fecha Inicio",
+            value=pd.to_datetime(f"{ano_actual}-01-01"),
+            key="newton_inicio"
+        )
     with col2:
-        fecha_fin = st.date_input("📅 Fecha Fin",
-                                  value=pd.to_datetime(f"{ano_actual}-12-31"),
-                                  key="newton_fin")
+        fecha_fin = st.date_input(
+            "📅 Fecha Fin",
+            value=pd.to_datetime(f"{ano_actual}-12-31"),
+            key="newton_fin"
+        )
     
-    df_newton = get_newton_rango(fecha_inicio.strftime('%Y-%m-%d'),
-                                 fecha_fin.strftime('%Y-%m-%d'))
+    df_newton = get_newton_rango(
+        fecha_inicio.strftime('%Y-%m-%d'),
+        fecha_fin.strftime('%Y-%m-%d')
+    )
     
     if not df_newton.empty:
         df_newton_pivot_cant = df_newton.pivot_table(
