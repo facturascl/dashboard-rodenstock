@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
+import plotly.express as px
 import sqlite3
 from datetime import datetime
 
@@ -207,7 +208,8 @@ with tab1:
         y=df_comp_actual_full['cantidad_facturas'],
         name='Cantidad de Facturas',
         yaxis='y1',
-        marker=dict(color='rgba(0, 118, 168, 0.7)')
+        marker=dict(color='rgba(0, 118, 168, 0.7)'),
+        hovertemplate='<b>%{x}</b><br>Facturas: %{y:,.0f}<extra></extra>'
     ))
     fig_actual.add_trace(go.Scatter(
         x=[meses_nombres[i-1] for i in df_comp_actual_full['mes']],
@@ -216,7 +218,8 @@ with tab1:
         yaxis='y2',
         mode='lines+markers',
         line=dict(color='#FF6B6B', width=3),
-        marker=dict(size=10)
+        marker=dict(size=10),
+        hovertemplate='<b>%{x}</b><br>Total: $%{y:,.0f}<extra></extra>'
     ))
     # Línea de promedio mensual por factura
     fig_actual.add_trace(go.Scatter(
@@ -225,7 +228,8 @@ with tab1:
         name='Promedio Mensual por Factura ($)',
         yaxis='y2',
         mode='lines',
-        line=dict(color='rgba(0,0,0,0.6)', width=2, dash='dash')
+        line=dict(color='rgba(0,0,0,0.6)', width=2, dash='dash'),
+        hovertemplate='<b>%{x}</b><br>Promedio: $%{y:,.0f}<extra></extra>'
     ))
     fig_actual.update_layout(
         xaxis_title="Mes",
@@ -239,15 +243,18 @@ with tab1:
     
     tabla_actual = df_comp_actual_full.copy()
     tabla_actual['mes_nombre'] = [meses_nombres[i-1] for i in tabla_actual['mes']]
+    tabla_actual['cantidad_facturas_fmt'] = tabla_actual['cantidad_facturas'].apply(lambda x: f"{int(x):,}")
+    tabla_actual['total_dinero_fmt'] = tabla_actual['total_dinero'].apply(lambda x: f"${int(x):,}")
+    tabla_actual['promedio_fmt'] = tabla_actual['promedio'].apply(lambda x: f"${int(x):,}")
     st.dataframe(
-        tabla_actual[['mes_nombre', 'cantidad_facturas', 'total_dinero', 'promedio']],
+        tabla_actual[['mes_nombre', 'cantidad_facturas_fmt', 'total_dinero_fmt', 'promedio_fmt']],
         use_container_width=True,
         hide_index=True,
         column_config={
             "mes_nombre": st.column_config.TextColumn("Mes", width=80),
-            "cantidad_facturas": st.column_config.NumberColumn("Facturas", width=100),
-            "total_dinero": st.column_config.NumberColumn("Total ($)", width=130, format="$%d"),
-            "promedio": st.column_config.NumberColumn("Promedio/Factura ($)", width=150, format="$%d"),
+            "cantidad_facturas_fmt": st.column_config.TextColumn("Facturas", width=100),
+            "total_dinero_fmt": st.column_config.TextColumn("Total ($)", width=130),
+            "promedio_fmt": st.column_config.TextColumn("Promedio/Factura ($)", width=150),
         }
     )
     
@@ -296,7 +303,8 @@ with tab1:
             y=df_comp1_full['cantidad_facturas'],
             name='Cantidad',
             yaxis='y1',
-            marker=dict(color='rgba(0, 118, 168, 0.7)')
+            marker=dict(color='rgba(0, 118, 168, 0.7)'),
+            hovertemplate='<b>%{x}</b><br>Facturas: %{y:,.0f}<extra></extra>'
         ))
         fig1.add_trace(go.Scatter(
             x=[meses_nombres[i-1] for i in df_comp1_full['mes']],
@@ -305,7 +313,8 @@ with tab1:
             yaxis='y2',
             mode='lines+markers',
             line=dict(color='#FF6B6B', width=3),
-            marker=dict(size=10)
+            marker=dict(size=10),
+            hovertemplate='<b>%{x}</b><br>Total: $%{y:,.0f}<extra></extra>'
         ))
         fig1.add_trace(go.Scatter(
             x=[meses_nombres[i-1] for i in df_comp1_full['mes']],
@@ -313,7 +322,8 @@ with tab1:
             name='Promedio Mensual por Factura ($)',
             yaxis='y2',
             mode='lines',
-            line=dict(color='rgba(0,0,0,0.6)', width=2, dash='dash')
+            line=dict(color='rgba(0,0,0,0.6)', width=2, dash='dash'),
+            hovertemplate='<b>%{x}</b><br>Promedio: $%{y:,.0f}<extra></extra>'
         ))
         fig1.update_layout(
             xaxis_title="Mes",
@@ -334,7 +344,8 @@ with tab1:
                 y=df_comp2_full['cantidad_facturas'],
                 name='Cantidad',
                 yaxis='y1',
-                marker=dict(color='rgba(76, 175, 80, 0.7)')
+                marker=dict(color='rgba(76, 175, 80, 0.7)'),
+                hovertemplate='<b>%{x}</b><br>Facturas: %{y:,.0f}<extra></extra>'
             ))
             fig2.add_trace(go.Scatter(
                 x=[meses_nombres[i-1] for i in df_comp2_full['mes']],
@@ -343,7 +354,8 @@ with tab1:
                 yaxis='y2',
                 mode='lines+markers',
                 line=dict(color='#FFC107', width=3),
-                marker=dict(size=10)
+                marker=dict(size=10),
+                hovertemplate='<b>%{x}</b><br>Total: $%{y:,.0f}<extra></extra>'
             ))
             fig2.add_trace(go.Scatter(
                 x=[meses_nombres[i-1] for i in df_comp2_full['mes']],
@@ -351,7 +363,8 @@ with tab1:
                 name='Promedio Mensual por Factura ($)',
                 yaxis='y2',
                 mode='lines',
-                line=dict(color='rgba(0,0,0,0.6)', width=2, dash='dash')
+                line=dict(color='rgba(0,0,0,0.6)', width=2, dash='dash'),
+                hovertemplate='<b>%{x}</b><br>Promedio: $%{y:,.0f}<extra></extra>'
             ))
             fig2.update_layout(
                 xaxis_title="Mes",
@@ -371,15 +384,18 @@ with tab1:
         st.caption(f"Año {ano_comp1}")
         tabla1 = df_comp1_full.copy()
         tabla1['mes_nombre'] = [meses_nombres[i-1] for i in tabla1['mes']]
+        tabla1['cantidad_facturas_fmt'] = tabla1['cantidad_facturas'].apply(lambda x: f"{int(x):,}")
+        tabla1['total_dinero_fmt'] = tabla1['total_dinero'].apply(lambda x: f"${int(x):,}")
+        tabla1['promedio_fmt'] = tabla1['promedio'].apply(lambda x: f"${int(x):,}")
         st.dataframe(
-            tabla1[['mes_nombre', 'cantidad_facturas', 'total_dinero', 'promedio']],
+            tabla1[['mes_nombre', 'cantidad_facturas_fmt', 'total_dinero_fmt', 'promedio_fmt']],
             use_container_width=True,
             hide_index=True,
             column_config={
                 "mes_nombre": st.column_config.TextColumn("Mes", width=60),
-                "cantidad_facturas": st.column_config.NumberColumn("Facturas", width=80),
-                "total_dinero": st.column_config.NumberColumn("Total", width=100, format="$%d"),
-                "promedio": st.column_config.NumberColumn("Promedio", width=100, format="$%d"),
+                "cantidad_facturas_fmt": st.column_config.TextColumn("Facturas", width=80),
+                "total_dinero_fmt": st.column_config.TextColumn("Total", width=100),
+                "promedio_fmt": st.column_config.TextColumn("Promedio", width=100),
             }
         )
     
@@ -388,15 +404,18 @@ with tab1:
             st.caption(f"Año {ano_comp2}")
             tabla2 = df_comp2_full.copy()
             tabla2['mes_nombre'] = [meses_nombres[i-1] for i in tabla2['mes']]
+            tabla2['cantidad_facturas_fmt'] = tabla2['cantidad_facturas'].apply(lambda x: f"{int(x):,}")
+            tabla2['total_dinero_fmt'] = tabla2['total_dinero'].apply(lambda x: f"${int(x):,}")
+            tabla2['promedio_fmt'] = tabla2['promedio'].apply(lambda x: f"${int(x):,}")
             st.dataframe(
-                tabla2[['mes_nombre', 'cantidad_facturas', 'total_dinero', 'promedio']],
+                tabla2[['mes_nombre', 'cantidad_facturas_fmt', 'total_dinero_fmt', 'promedio_fmt']],
                 use_container_width=True,
                 hide_index=True,
                 column_config={
                     "mes_nombre": st.column_config.TextColumn("Mes", width=60),
-                    "cantidad_facturas": st.column_config.NumberColumn("Facturas", width=80),
-                    "total_dinero": st.column_config.NumberColumn("Total", width=100, format="$%d"),
-                    "promedio": st.column_config.NumberColumn("Promedio", width=100, format="$%d"),
+                    "cantidad_facturas_fmt": st.column_config.TextColumn("Facturas", width=80),
+                    "total_dinero_fmt": st.column_config.TextColumn("Total", width=100),
+                    "promedio_fmt": st.column_config.TextColumn("Promedio", width=100),
                 }
             )
 
@@ -421,53 +440,149 @@ with tab2:
     if not df_subcat.empty:
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("Total Subcategorías", len(df_subcat))
+            st.metric("Total Subcategorías", f"{len(df_subcat):,}")
         with col2:
             st.metric("Ingresos Totales", f"${df_subcat['costo'].sum():,.0f}")
         with col3:
-            st.metric("Cantidad Total", f"{df_subcat['cantidad'].sum()}")
+            st.metric("Cantidad Total", f"{df_subcat['cantidad'].sum():,}")
         with col4:
-            st.metric("Promedio General", f"${int(df_subcat['costo'].sum() / df_subcat['cantidad'].sum()):,.0f}")
+            promedio_gral = int(df_subcat['costo'].sum() / df_subcat['cantidad'].sum())
+            st.metric("Promedio General", f"${promedio_gral:,}")
         
         st.divider()
         
         st.subheader("Detalle Completo")
+        df_subcat_fmt = df_subcat.copy()
+        df_subcat_fmt['cantidad_fmt'] = df_subcat_fmt['cantidad'].apply(lambda x: f"{int(x):,}")
+        df_subcat_fmt['costo_fmt'] = df_subcat_fmt['costo'].apply(lambda x: f"${int(x):,}")
+        df_subcat_fmt['promedio_fmt'] = df_subcat_fmt['promedio'].apply(lambda x: f"${int(x):,}")
+        df_subcat_fmt['pct_fmt'] = df_subcat_fmt['pct'].apply(lambda x: f"{x:.2f}%")
         st.dataframe(
-            df_subcat,
+            df_subcat_fmt[['categoria', 'subcategoria', 'cantidad_fmt', 'costo_fmt', 'promedio_fmt', 'pct_fmt']],
             use_container_width=True,
             hide_index=True,
             column_config={
                 "categoria": st.column_config.TextColumn("Categoría", width=150),
                 "subcategoria": st.column_config.TextColumn("Subcategoría", width=200),
-                "cantidad": st.column_config.NumberColumn("Cantidad", width=100),
-                "costo": st.column_config.NumberColumn("Total ($)", width=130, format="$%d"),
-                "promedio": st.column_config.NumberColumn("Promedio ($)", width=130, format="$%d"),
-                "pct": st.column_config.NumberColumn("% Total", width=100, format="%.2f%%"),
+                "cantidad_fmt": st.column_config.TextColumn("Cantidad", width=100),
+                "costo_fmt": st.column_config.TextColumn("Total ($)", width=130),
+                "promedio_fmt": st.column_config.TextColumn("Promedio ($)", width=130),
+                "pct_fmt": st.column_config.TextColumn("% Total", width=100),
             }
         )
         
-        st.subheader("Distribución por Subcategoría")
-        fig_pie = go.Figure(data=[go.Pie(
-            labels=df_subcat['subcategoria'],
-            values=df_subcat['costo'],
-            textposition='inside',
-            hovertemplate='<b>%{label}</b><br>$%{value:,.0f}<br>%{percent}<extra></extra>'
-        )])
-        st.plotly_chart(fig_pie, use_container_width=True)
+        st.subheader("Distribución por Categoría y Subcategoría")
         
-        st.subheader("Gráfico de Barras")
-        fig_bar = go.Figure(data=[go.Bar(
-            x=df_subcat['subcategoria'],
-            y=df_subcat['costo'],
-            text=[f"{p:.1f}%" for p in df_subcat['pct']],
-            textposition='outside',
-            marker=dict(color=df_subcat['costo'], colorscale='Viridis'),
-            hovertemplate='<b>%{x}</b><br>Categoría: ' + df_subcat['categoria'].astype(str) +
-                          '<br>Cantidad: ' + df_subcat['cantidad'].astype(str) +
-                          '<br>Total: $%{y:,.0f}<extra></extra>'
-        )])
-        fig_bar.update_layout(xaxis_title="Subcategoría", yaxis_title="Total ($)", height=400)
-        st.plotly_chart(fig_bar, use_container_width=True)
+        # Crear DataFrame para visualización
+        df_subcat_vis = df_subcat.copy()
+        df_subcat_vis['label_completo'] = df_subcat_vis['categoria'] + ' - ' + df_subcat_vis['subcategoria']
+        
+        # Dos columnas para los gráficos lado a lado
+        col_donut, col_sunburst = st.columns(2)
+        
+        with col_donut:
+            st.markdown("#### Gráfico Circular (Donut)")
+            
+            # Colores personalizados por categoría
+            colors = px.colors.qualitative.Set3
+            
+            # Calcular porcentajes manualmente para consistencia
+            total_mes = df_subcat_vis['costo'].sum()
+            df_subcat_vis['pct_calculado'] = (df_subcat_vis['costo'] / total_mes * 100).round(2)
+            
+            fig_donut = go.Figure(data=[go.Pie(
+                labels=df_subcat_vis['label_completo'],
+                values=df_subcat_vis['costo'],
+                hole=0.45,
+                textposition='outside',
+                texttemplate='<b>%{label}</b><br>%{customdata:.1f}%',
+                customdata=df_subcat_vis['pct_calculado'],
+                hovertemplate='<b>%{label}</b><br>' +
+                              'Total: $%{value:,.0f}<br>' +
+                              'Porcentaje: %{customdata:.2f}%<br>' +
+                              '<extra></extra>',
+                marker=dict(
+                    colors=colors,
+                    line=dict(color='white', width=3)
+                ),
+                pull=[0.03] * len(df_subcat_vis),
+                rotation=45
+            )])
+            
+            fig_donut.update_layout(
+                showlegend=False,
+                height=550,
+                annotations=[dict(
+                    text=f'<b>Total</b><br>${total_mes:,.0f}',
+                    x=0.5, y=0.5,
+                    font=dict(size=16, color='#333'),
+                    showarrow=False
+                )],
+                title=dict(
+                    text=f'{meses_nombres[mes_tab2-1]} {ano_actual}',
+                    x=0.5,
+                    xanchor='center',
+                    font=dict(size=14, color='#333')
+                ),
+                margin=dict(l=10, r=10, t=60, b=10)
+            )
+            st.plotly_chart(fig_donut, use_container_width=True)
+        
+        with col_sunburst:
+            st.markdown("#### Vista Jerárquica (Sunburst)")
+            
+            fig_sunburst = px.sunburst(
+                df_subcat_vis,
+                path=['categoria', 'subcategoria'],
+                values='costo',
+                color='costo',
+                color_continuous_scale='Viridis'
+            )
+            
+            # Preparar customdata con toda la info
+            customdata_list = []
+            for _, row in df_subcat_vis.iterrows():
+                customdata_list.append([row['cantidad'], row['promedio'], row['pct_calculado']])
+            
+            fig_sunburst.update_traces(
+                textinfo='label+percent parent',
+                customdata=customdata_list,
+                hovertemplate='<b>%{label}</b><br>' +
+                             'Total: $%{value:,.0f}<br>' +
+                             'Cantidad: %{customdata[0]}<br>' +
+                             'Promedio: $%{customdata[1]:,.0f}<br>' +
+                             'Del total mes: %{customdata[2]:.2f}%<br>' +
+                             'De su categoría: %{percentParent}<br>' +
+                             '<extra></extra>',
+                marker=dict(line=dict(color='white', width=2))
+            )
+            
+            fig_sunburst.update_layout(
+                height=550,
+                title=dict(
+                    text='Categorías → Subcategorías',
+                    x=0.5,
+                    xanchor='center',
+                    font=dict(size=14, color='#333')
+                ),
+                margin=dict(l=10, r=10, t=60, b=10)
+            )
+            
+            st.plotly_chart(fig_sunburst, use_container_width=True)
+        
+        # Explicación clara de los porcentajes
+        st.info("""
+        📊 **Explicación de porcentajes:**
+        
+        **Gráfico Donut (izquierda):** Muestra el porcentaje que representa cada subcategoría del total del mes completo.
+        
+        **Gráfico Sunburst (derecha):** 
+        - **Círculo interno (categorías):** % respecto al total del mes
+        - **Círculo externo (subcategorías):** % respecto a su categoría padre
+        - En el tooltip se muestran ambos: "Del total mes" y "De su categoría"
+        
+        Por ejemplo: "Monofocales - Hi-index Verde" puede ser 20% del total del mes, pero 35% dentro de la categoría Monofocales.
+        """)
     else:
         st.info("ℹ️ Sin datos de subcategorías")
 
@@ -517,7 +632,7 @@ with tab3:
                 yaxis='y1',
                 opacity=0.7,
                 hovertemplate='<b>%{x}</b><br>' + col +
-                              ' Cantidad: %{y}<extra></extra>'
+                              ' Cantidad: %{y:,.0f}<extra></extra>'
             ))
         
         # Líneas para promedio diario
