@@ -4,16 +4,40 @@ import plotly.graph_objects as go
 import plotly.express as px
 import sqlite3
 from datetime import datetime
+from streamlit_echarts import st_echarts
 
 st.set_page_config(page_title="Dashboard Rodenstock", page_icon="📊", layout="wide")
 
+import os
+
 DB_PATH = "facturas.db"
+
+# Verificar si existe la base de datos
+if not os.path.exists(DB_PATH):
+    st.error(f"❌ Base de datos no encontrada en: {DB_PATH}")
+    st.info("📁 Archivos en directorio actual: " + ", ".join(os.listdir(".")))
+    st.stop()
+else:
+    # Mostrar info de la BD solo en desarrollo (puedes comentar esto después)
+    file_size = os.path.getsize(DB_PATH)
+    st.sidebar.success(f"✅ BD encontrada ({file_size:,} bytes)")
 
 @st.cache_resource
 def get_db_connection():
     try:
         conn = sqlite3.connect(DB_PATH, timeout=10.0, check_same_thread=False)
         conn.row_factory = sqlite3.Row
+        
+        # Verificar que hay datos
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) as total FROM facturas")
+        total_facturas = cursor.fetchone()[0]
+        
+        if total_facturas == 0:
+            st.error("⚠️ La base de datos está vacía")
+        else:
+            st.sidebar.info(f"📊 Total facturas en BD: {total_facturas:,}")
+            
         return conn
     except Exception as e:
         st.error(f"❌ Error BD: {e}")
@@ -46,6 +70,23 @@ try:
     """
     anos_df = pd.read_sql_query(anos_query, conn)
     anos_disponibles = sorted(anos_df['ano'].tolist(), reverse=True) if not anos_df.empty else [2025]
+    
+    # Diagnóstico: mostrar años disponibles
+    st.sidebar.write("📅 Años con datos:", anos_disponibles)
+    
+    # Diagnóstico: contar facturas por año
+    count_query = """
+        SELECT 
+            CAST(STRFTIME('%Y', fechaemision) AS INTEGER) as ano,
+            COUNT(*) as total
+        FROM facturas 
+        WHERE fechaemision IS NOT NULL
+        GROUP BY ano
+        ORDER BY ano DESC
+    """
+    count_df = pd.read_sql_query(count_query, conn)
+    st.sidebar.write("📊 Facturas por año:")
+    st.sidebar.dataframe(count_df, hide_index=True)
     
     # Selector de año actual
     ano_actual = st.sidebar.selectbox("📅 Año Actual", anos_disponibles, index=0, key="ano_actual")
@@ -140,6 +181,145 @@ def get_subcategorias_completo_mes(ano, mes):
     return pd.read_sql_query(query, conn)
 
 @st.cache_data(ttl=300)
+def get_subcategorias_historico(ano, subcategorias_lista):
+    """Obtener histórico de subcategorías específicas a lo largo del año."""
+    if not subcategorias_lista:
+        return pd.DataFrame()
+    
+    subcats_str = "', '".join(subcategorias_lista)
+    query = f"""
+    WITH facturas_clasif AS (
+      SELECT
+        f.numerofactura,
+        CAST(STRFTIME('%Y', f.fechaemision) AS INTEGER) AS ano,
+        CAST(STRFTIME('%m', f.fechaemision) AS INTEGER) AS mes,
+        CASE 
+          WHEN lf.clasificacion_categoria IS NULL 
+               OR lf.clasificacion_categoria = 'Sin clasificacion' 
+               OR TRIM(lf.clasificacion_categoria) = ''
+            THEN 'Otros'
+          ELSE lf.clasificacion_categoria
+        END AS categoria,
+        COALESCE(lf.clasificacion_subcategoria, '') AS subcategoria,
+        COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0) AS total_factura
+      FROM lineas_factura lf
+      INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
+      WHERE f.fechaemision IS NOT NULL
+    ),
+    facturas_unicas AS (
+      SELECT
+        numerofactura,
+        ano,
+        mes,
+        categoria,
+        MIN(subcategoria) AS subcategoria,
+        MAX(total_factura) AS total_factura
+      FROM facturas_clasif
+      WHERE subcategoria IN ('{subcats_str}')
+      GROUP BY numerofactura, ano, mes, categoria
+    )
+    SELECT
+      mes,
+      categoria || ' - ' || subcategoria as label,
+      CAST(SUM(total_factura) AS INTEGER) AS total
+    FROM facturas_unicas
+    WHERE ano = {ano}
+    GROUP BY mes, label
+    ORDER BY mes, label
+    """
+    return pd.read_sql_query(query, conn)
+
+@st.cache_data(ttl=300)
+def get_evolucion_categorias_ano(ano):
+    """Evolución mensual de categorías a lo largo del año."""
+    query = f"""
+    WITH facturas_clasif AS (
+      SELECT
+        f.numerofactura,
+        CAST(STRFTIME('%Y', f.fechaemision) AS INTEGER) AS ano,
+        CAST(STRFTIME('%m', f.fechaemision) AS INTEGER) AS mes,
+        CASE 
+          WHEN lf.clasificacion_categoria IS NULL 
+               OR lf.clasificacion_categoria = 'Sin clasificacion' 
+               OR TRIM(lf.clasificacion_categoria) = ''
+            THEN 'Otros'
+          ELSE lf.clasificacion_categoria
+        END AS categoria,
+        COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0) AS total_factura
+      FROM lineas_factura lf
+      INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
+      WHERE f.fechaemision IS NOT NULL
+    ),
+    facturas_unicas AS (
+      SELECT
+        numerofactura,
+        ano,
+        mes,
+        categoria,
+        MAX(total_factura) AS total_factura
+      FROM facturas_clasif
+      GROUP BY numerofactura, ano, mes, categoria
+    )
+    SELECT
+      mes,
+      categoria,
+      COUNT(DISTINCT numerofactura) as cantidad,
+      CAST(SUM(total_factura) AS INTEGER) as total_mes,
+      CAST(AVG(total_factura) AS INTEGER) as promedio_mes
+    FROM facturas_unicas
+    WHERE ano = {ano}
+    GROUP BY mes, categoria
+    ORDER BY mes, categoria
+    """
+    return pd.read_sql_query(query, conn)
+
+@st.cache_data(ttl=300)
+def get_evolucion_subcategorias_ano(ano):
+    """Evolución mensual de subcategorías a lo largo del año."""
+    query = f"""
+    WITH facturas_clasif AS (
+      SELECT
+        f.numerofactura,
+        CAST(STRFTIME('%Y', f.fechaemision) AS INTEGER) AS ano,
+        CAST(STRFTIME('%m', f.fechaemision) AS INTEGER) AS mes,
+        CASE 
+          WHEN lf.clasificacion_categoria IS NULL 
+               OR lf.clasificacion_categoria = 'Sin clasificacion' 
+               OR TRIM(lf.clasificacion_categoria) = ''
+            THEN 'Otros'
+          ELSE lf.clasificacion_categoria
+        END AS categoria,
+        COALESCE(lf.clasificacion_subcategoria, '') AS subcategoria,
+        COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0) AS total_factura
+      FROM lineas_factura lf
+      INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
+      WHERE f.fechaemision IS NOT NULL
+    ),
+    facturas_unicas AS (
+      SELECT
+        numerofactura,
+        ano,
+        mes,
+        categoria,
+        MIN(subcategoria) AS subcategoria,
+        MAX(total_factura) AS total_factura
+      FROM facturas_clasif
+      GROUP BY numerofactura, ano, mes, categoria
+    )
+    SELECT
+      mes,
+      categoria || ' - ' || subcategoria as label,
+      COUNT(DISTINCT numerofactura) as cantidad,
+      CAST(SUM(total_factura) AS INTEGER) as total_mes,
+      CAST(AVG(total_factura) AS INTEGER) as promedio_mes
+    FROM facturas_unicas
+    WHERE ano = {ano}
+    GROUP BY mes, label
+    ORDER BY mes, label
+    """
+    return pd.read_sql_query(query, conn)
+
+@st.cache_data(ttl=300)
 def get_newton_rango(fecha_inicio, fecha_fin):
     """Newton vs Newton Plus con rango de fechas."""
     query = f"""
@@ -174,10 +354,11 @@ def get_newton_rango(fecha_inicio, fecha_fin):
 # ============================================================
 # TABS PRINCIPALES
 # ============================================================
-tab1, tab2, tab3 = st.tabs([
+tab1, tab2, tab3, tab4 = st.tabs([
     "📊 Comparativa Anual",
     "🏷️ Desglose Subcategorías",
-    "📈 Newton vs Plus"
+    "📈 Evolución Mensual",
+    "🔵 Newton vs Plus"
 ])
 
 # ============================================================
@@ -477,120 +658,395 @@ with tab2:
         df_subcat_vis = df_subcat.copy()
         df_subcat_vis['label_completo'] = df_subcat_vis['categoria'] + ' - ' + df_subcat_vis['subcategoria']
         
-        # Dos columnas para los gráficos lado a lado
+        # Calcular porcentajes manualmente para consistencia
+        total_mes = df_subcat_vis['costo'].sum()
+        df_subcat_vis['pct_calculado'] = (df_subcat_vis['costo'] / total_mes * 100).round(2)
+        
+        # ==== GRÁFICO ECHARTS INTERACTIVO ====
+        st.markdown("#### 📊 Evolución Interactiva con Pie Chart")
+        
+        # Obtener top 6 subcategorías del mes
+        top_subcats = df_subcat_vis.nlargest(6, 'costo')
+        subcats_lista = top_subcats['subcategoria'].tolist()
+        
+        # Obtener datos históricos
+        df_historico = get_subcategorias_historico(ano_actual, subcats_lista)
+        
+        if not df_historico.empty:
+            # Preparar dataset para ECharts
+            meses_lista = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 
+                          'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
+            
+            # Pivotar datos
+            df_pivot = df_historico.pivot(index='mes', columns='label', values='total').fillna(0)
+            
+            # Crear dataset source para ECharts
+            dataset_source = [['Mes'] + [col for col in df_pivot.columns]]
+            for mes_num in range(1, 13):
+                row = [meses_lista[mes_num-1]]
+                if mes_num in df_pivot.index:
+                    row.extend([int(df_pivot.loc[mes_num, col]) if col in df_pivot.columns else 0 
+                               for col in df_pivot.columns])
+                else:
+                    row.extend([0] * len(df_pivot.columns))
+                dataset_source.append(row)
+            
+            # Crear series dinámicas
+            series_lines = []
+            for i in range(len(df_pivot.columns)):
+                series_lines.append({
+                    "type": "line",
+                    "smooth": True,
+                    "seriesLayoutBy": "row",
+                    "emphasis": {"focus": "series"},
+                })
+            
+            # Agregar pie chart
+            series_lines.append({
+                "type": "pie",
+                "id": "pie",
+                "radius": "35%",
+                "center": ["50%", "30%"],
+                "emphasis": {"focus": "self"},
+                "label": {
+                    "formatter": "{b}: ${c} ({d}%)",
+                    "fontSize": 10
+                },
+                "encode": {
+                    "itemName": "Mes",
+                    "value": meses_lista[mes_tab2-1],
+                    "tooltip": meses_lista[mes_tab2-1]
+                },
+            })
+            
+            option = {
+                "legend": {"top": "5%"},
+                "tooltip": {
+                    "trigger": "axis",
+                    "showContent": False,
+                    "axisPointer": {"type": "cross"}
+                },
+                "dataset": {"source": dataset_source},
+                "xAxis": {"type": "category", "boundaryGap": False},
+                "yAxis": {
+                    "gridIndex": 0,
+                    "name": "Ingresos ($)",
+                    "axisLabel": {"formatter": "${value}"}
+                },
+                "grid": {"top": "60%", "left": "10%", "right": "10%"},
+                "series": series_lines,
+            }
+            
+            st_echarts(option, height="600px", key="echarts_interactivo")
+            
+            st.info("💡 **Tip:** Pasa el cursor sobre las líneas para ver cómo cambia el pie chart según el mes seleccionado.")
+        
+        st.divider()
+        
+        # Dos columnas para los gráficos estáticos lado a lado
         col_donut, col_sunburst = st.columns(2)
         
         with col_donut:
-            st.markdown("#### Gráfico Circular (Donut)")
+            st.markdown("#### Gráfico Donut - Mes Actual")
             
-            # Colores personalizados por categoría
-            colors = px.colors.qualitative.Set3
+            # Donut con ECharts
+            donut_data = [
+                {"value": int(row['costo']), "name": row['label_completo']}
+                for _, row in df_subcat_vis.iterrows()
+            ]
             
-            # Calcular porcentajes manualmente para consistencia
-            total_mes = df_subcat_vis['costo'].sum()
-            df_subcat_vis['pct_calculado'] = (df_subcat_vis['costo'] / total_mes * 100).round(2)
+            donut_option = {
+                "title": {
+                    "text": f"{meses_nombres[mes_tab2-1]} {ano_actual}",
+                    "subtext": f"Total: ${total_mes:,.0f}",
+                    "left": "center",
+                    "textStyle": {"fontSize": 14},
+                    "subtextStyle": {"fontSize": 12}
+                },
+                "tooltip": {
+                    "trigger": "item",
+                    "formatter": "{b}<br/>Total: ${c}<br/>Porcentaje: {d}%"
+                },
+                "legend": {
+                    "type": "scroll",
+                    "orient": "vertical",
+                    "right": 10,
+                    "top": 60,
+                    "bottom": 20,
+                    "textStyle": {"fontSize": 9}
+                },
+                "series": [{
+                    "type": "pie",
+                    "radius": ["40%", "70%"],
+                    "center": ["40%", "55%"],
+                    "avoidLabelOverlap": True,
+                    "itemStyle": {
+                        "borderRadius": 10,
+                        "borderColor": "#fff",
+                        "borderWidth": 2
+                    },
+                    "label": {
+                        "show": True,
+                        "formatter": "{d}%",
+                        "fontSize": 10
+                    },
+                    "emphasis": {
+                        "label": {"show": True, "fontSize": 12, "fontWeight": "bold"},
+                        "itemStyle": {
+                            "shadowBlur": 15,
+                            "shadowOffsetX": 0,
+                            "shadowColor": "rgba(0, 0, 0, 0.5)"
+                        }
+                    },
+                    "data": donut_data
+                }]
+            }
             
-            fig_donut = go.Figure(data=[go.Pie(
-                labels=df_subcat_vis['label_completo'],
-                values=df_subcat_vis['costo'],
-                hole=0.45,
-                textposition='outside',
-                texttemplate='<b>%{label}</b><br>%{customdata:.1f}%',
-                customdata=df_subcat_vis['pct_calculado'],
-                hovertemplate='<b>%{label}</b><br>' +
-                              'Total: $%{value:,.0f}<br>' +
-                              'Porcentaje: %{customdata:.2f}%<br>' +
-                              '<extra></extra>',
-                marker=dict(
-                    colors=colors,
-                    line=dict(color='white', width=3)
-                ),
-                pull=[0.03] * len(df_subcat_vis),
-                rotation=45
-            )])
-            
-            fig_donut.update_layout(
-                showlegend=False,
-                height=550,
-                annotations=[dict(
-                    text=f'<b>Total</b><br>${total_mes:,.0f}',
-                    x=0.5, y=0.5,
-                    font=dict(size=16, color='#333'),
-                    showarrow=False
-                )],
-                title=dict(
-                    text=f'{meses_nombres[mes_tab2-1]} {ano_actual}',
-                    x=0.5,
-                    xanchor='center',
-                    font=dict(size=14, color='#333')
-                ),
-                margin=dict(l=10, r=10, t=60, b=10)
-            )
-            st.plotly_chart(fig_donut, use_container_width=True)
+            st_echarts(donut_option, height="550px", key="echarts_donut")
         
         with col_sunburst:
-            st.markdown("#### Vista Jerárquica (Sunburst)")
+            st.markdown("#### Vista Sunburst - Jerarquía")
             
-            fig_sunburst = px.sunburst(
-                df_subcat_vis,
-                path=['categoria', 'subcategoria'],
-                values='costo',
-                color='costo',
-                color_continuous_scale='Viridis'
-            )
+            # Preparar datos sunburst
+            categorias_agrupadas = df_subcat_vis.groupby('categoria').agg({
+                'costo': 'sum'
+            }).reset_index()
             
-            # Preparar customdata con toda la info
-            customdata_list = []
-            for _, row in df_subcat_vis.iterrows():
-                customdata_list.append([row['cantidad'], row['promedio'], row['pct_calculado']])
+            sunburst_data = []
+            for _, cat_row in categorias_agrupadas.iterrows():
+                categoria = cat_row['categoria']
+                subcats = df_subcat_vis[df_subcat_vis['categoria'] == categoria]
+                
+                children = []
+                for _, subcat_row in subcats.iterrows():
+                    children.append({
+                        "name": subcat_row['subcategoria'],
+                        "value": int(subcat_row['costo'])
+                    })
+                
+                sunburst_data.append({
+                    "name": categoria,
+                    "value": int(cat_row['costo']),
+                    "children": children
+                })
             
-            fig_sunburst.update_traces(
-                textinfo='label+percent parent',
-                customdata=customdata_list,
-                hovertemplate='<b>%{label}</b><br>' +
-                             'Total: $%{value:,.0f}<br>' +
-                             'Cantidad: %{customdata[0]}<br>' +
-                             'Promedio: $%{customdata[1]:,.0f}<br>' +
-                             'Del total mes: %{customdata[2]:.2f}%<br>' +
-                             'De su categoría: %{percentParent}<br>' +
-                             '<extra></extra>',
-                marker=dict(line=dict(color='white', width=2))
-            )
+            sunburst_option = {
+                "title": {
+                    "text": "Categorías → Subcategorías",
+                    "left": "center",
+                    "textStyle": {"fontSize": 14}
+                },
+                "tooltip": {
+                    "trigger": "item",
+                    "formatter": "{b}<br/>Total: ${c}<br/>Porcentaje: {d}%"
+                },
+                "series": [{
+                    "type": "sunburst",
+                    "data": sunburst_data,
+                    "radius": [0, "90%"],
+                    "label": {"rotate": "radial", "fontSize": 10},
+                    "itemStyle": {
+                        "borderRadius": 7,
+                        "borderWidth": 2,
+                        "borderColor": "#fff"
+                    },
+                    "emphasis": {"focus": "ancestor"}
+                }]
+            }
             
-            fig_sunburst.update_layout(
-                height=550,
-                title=dict(
-                    text='Categorías → Subcategorías',
-                    x=0.5,
-                    xanchor='center',
-                    font=dict(size=14, color='#333')
-                ),
-                margin=dict(l=10, r=10, t=60, b=10)
-            )
-            
-            st.plotly_chart(fig_sunburst, use_container_width=True)
-        
-        # Explicación clara de los porcentajes
-        st.info("""
-        📊 **Explicación de porcentajes:**
-        
-        **Gráfico Donut (izquierda):** Muestra el porcentaje que representa cada subcategoría del total del mes completo.
-        
-        **Gráfico Sunburst (derecha):** 
-        - **Círculo interno (categorías):** % respecto al total del mes
-        - **Círculo externo (subcategorías):** % respecto a su categoría padre
-        - En el tooltip se muestran ambos: "Del total mes" y "De su categoría"
-        
-        Por ejemplo: "Monofocales - Hi-index Verde" puede ser 20% del total del mes, pero 35% dentro de la categoría Monofocales.
-        """)
+            st_echarts(sunburst_option, height="550px", key="echarts_sunburst")
     else:
         st.info("ℹ️ Sin datos de subcategorías")
 
 # ============================================================
-# TAB 3: NEWTON VS NEWTON PLUS
+# TAB 3: EVOLUCIÓN MENSUAL
 # ============================================================
 with tab3:
-    st.header("📈 Newton vs Newton Plus")
+    st.header(f"📈 Evolución Mensual - Año {ano_actual}")
+    
+    # GRÁFICO 1: EVOLUCIÓN DE CATEGORÍAS
+    st.subheader("📊 Evolución de Categorías")
+    
+    df_evo_cat = get_evolucion_categorias_ano(ano_actual)
+    
+    if not df_evo_cat.empty:
+        # Pivotar datos para el gráfico
+        df_cat_pivot_cant = df_evo_cat.pivot_table(
+            index='mes', columns='categoria', values='cantidad',
+            aggfunc='sum', fill_value=0
+        )
+        df_cat_pivot_total = df_evo_cat.pivot_table(
+            index='mes', columns='categoria', values='total_mes',
+            aggfunc='sum', fill_value=0
+        )
+        
+        # Asegurar que tenemos todos los 12 meses
+        for mes in range(1, 13):
+            if mes not in df_cat_pivot_cant.index:
+                df_cat_pivot_cant.loc[mes] = 0
+            if mes not in df_cat_pivot_total.index:
+                df_cat_pivot_total.loc[mes] = 0
+        
+        df_cat_pivot_cant = df_cat_pivot_cant.sort_index()
+        df_cat_pivot_total = df_cat_pivot_total.sort_index()
+        
+        fig_cat = go.Figure()
+        
+        # UNA línea por categoría mostrando cantidad, con total en tooltip
+        for col in df_cat_pivot_cant.columns:
+            fig_cat.add_trace(go.Scatter(
+                x=[meses_nombres[m-1] for m in df_cat_pivot_cant.index],
+                y=df_cat_pivot_cant[col],
+                name=col,
+                mode='lines+markers',
+                line=dict(width=3),
+                marker=dict(size=8),
+                customdata=df_cat_pivot_total[col],
+                hovertemplate='<b>%{x}</b><br>' +
+                              '<b>' + col + '</b><br>' +
+                              'Cantidad: %{y:,.0f} | Total: $%{customdata:,.0f}' +
+                              '<extra></extra>'
+            ))
+        
+        fig_cat.update_layout(
+            xaxis_title="Mes",
+            yaxis=dict(title="Cantidad de Trabajos"),
+            hovermode='x unified',
+            height=500,
+            showlegend=True,
+            legend=dict(
+                orientation="v",
+                yanchor="top",
+                y=1,
+                xanchor="left",
+                x=1.02
+            )
+        )
+        
+        st.plotly_chart(fig_cat, use_container_width=True)
+        
+        # Tabla resumen por categoría
+        st.markdown("#### Resumen por Categoría")
+        resumen_cat = df_evo_cat.groupby('categoria').agg({
+            'cantidad': 'sum',
+            'total_mes': 'sum',
+            'promedio_mes': 'mean'
+        }).reset_index()
+        resumen_cat['cantidad_fmt'] = resumen_cat['cantidad'].apply(lambda x: f"{int(x):,}")
+        resumen_cat['total_fmt'] = resumen_cat['total_mes'].apply(lambda x: f"${int(x):,}")
+        resumen_cat['promedio_fmt'] = resumen_cat['promedio_mes'].apply(lambda x: f"${int(x):,}")
+        
+        st.dataframe(
+            resumen_cat[['categoria', 'cantidad_fmt', 'total_fmt', 'promedio_fmt']],
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "categoria": st.column_config.TextColumn("Categoría", width=200),
+                "cantidad_fmt": st.column_config.TextColumn("Total Cantidad", width=150),
+                "total_fmt": st.column_config.TextColumn("Total Ingresos", width=150),
+                "promedio_fmt": st.column_config.TextColumn("Promedio", width=150),
+            }
+        )
+    else:
+        st.info("ℹ️ Sin datos de categorías para este año")
+    
+    st.divider()
+    
+    # GRÁFICO 2: EVOLUCIÓN DE SUBCATEGORÍAS (TOP 10)
+    st.subheader("🏷️ Evolución de Subcategorías (Top 10)")
+    
+    df_evo_subcat = get_evolucion_subcategorias_ano(ano_actual)
+    
+    if not df_evo_subcat.empty:
+        # Obtener top 10 subcategorías por total anual
+        top_subcats_anual = df_evo_subcat.groupby('label')['total_mes'].sum().nlargest(10).index.tolist()
+        df_evo_subcat_top = df_evo_subcat[df_evo_subcat['label'].isin(top_subcats_anual)]
+        
+        # Pivotar datos para el gráfico
+        df_subcat_pivot_cant = df_evo_subcat_top.pivot_table(
+            index='mes', columns='label', values='cantidad',
+            aggfunc='sum', fill_value=0
+        )
+        df_subcat_pivot_total = df_evo_subcat_top.pivot_table(
+            index='mes', columns='label', values='total_mes',
+            aggfunc='sum', fill_value=0
+        )
+        
+        # Asegurar que tenemos todos los 12 meses
+        for mes in range(1, 13):
+            if mes not in df_subcat_pivot_cant.index:
+                df_subcat_pivot_cant.loc[mes] = 0
+            if mes not in df_subcat_pivot_total.index:
+                df_subcat_pivot_total.loc[mes] = 0
+        
+        df_subcat_pivot_cant = df_subcat_pivot_cant.sort_index()
+        df_subcat_pivot_total = df_subcat_pivot_total.sort_index()
+        
+        fig_subcat = go.Figure()
+        
+        # UNA línea por subcategoría mostrando cantidad, con total en tooltip
+        for col in df_subcat_pivot_cant.columns:
+            fig_subcat.add_trace(go.Scatter(
+                x=[meses_nombres[m-1] for m in df_subcat_pivot_cant.index],
+                y=df_subcat_pivot_cant[col],
+                name=col,
+                mode='lines+markers',
+                line=dict(width=3),
+                marker=dict(size=8),
+                customdata=df_subcat_pivot_total[col],
+                hovertemplate='<b>%{x}</b><br>' +
+                              '<b>' + col + '</b><br>' +
+                              'Cantidad: %{y:,.0f} | Total: $%{customdata:,.0f}' +
+                              '<extra></extra>'
+            ))
+        
+        fig_subcat.update_layout(
+            xaxis_title="Mes",
+            yaxis=dict(title="Cantidad de Trabajos"),
+            hovermode='x unified',
+            height=500,
+            showlegend=True,
+            legend=dict(
+                orientation="v",
+                yanchor="top",
+                y=1,
+                xanchor="left",
+                x=1.02
+            )
+        )
+        
+        st.plotly_chart(fig_subcat, use_container_width=True)
+        
+        # Tabla resumen por subcategoría (Top 10)
+        st.markdown("#### Resumen Top 10 Subcategorías del Año")
+        resumen_subcat = df_evo_subcat_top.groupby('label').agg({
+            'cantidad': 'sum',
+            'total_mes': 'sum',
+            'promedio_mes': 'mean'
+        }).reset_index().nlargest(10, 'total_mes')
+        resumen_subcat['cantidad_fmt'] = resumen_subcat['cantidad'].apply(lambda x: f"{int(x):,}")
+        resumen_subcat['total_fmt'] = resumen_subcat['total_mes'].apply(lambda x: f"${int(x):,}")
+        resumen_subcat['promedio_fmt'] = resumen_subcat['promedio_mes'].apply(lambda x: f"${int(x):,}")
+        
+        st.dataframe(
+            resumen_subcat[['label', 'cantidad_fmt', 'total_fmt', 'promedio_fmt']],
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "label": st.column_config.TextColumn("Categoría - Subcategoría", width=250),
+                "cantidad_fmt": st.column_config.TextColumn("Total Cantidad", width=150),
+                "total_fmt": st.column_config.TextColumn("Total Ingresos", width=150),
+                "promedio_fmt": st.column_config.TextColumn("Promedio", width=150),
+            }
+        )
+    else:
+        st.info("ℹ️ Sin datos de subcategorías para este año")
+
+# ============================================================
+# TAB 4: NEWTON VS NEWTON PLUS
+# ============================================================
+with tab4:
+    st.header("🔵 Newton vs Newton Plus")
     
     col1, col2 = st.columns(2)
     with col1:
