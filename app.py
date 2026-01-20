@@ -657,204 +657,79 @@ with tab2:
         # Crear DataFrame para visualización
         df_subcat_vis = df_subcat.copy()
         df_subcat_vis['label_completo'] = df_subcat_vis['categoria'] + ' - ' + df_subcat_vis['subcategoria']
-        
-        # Calcular porcentajes manualmente para consistencia
         total_mes = df_subcat_vis['costo'].sum()
-        df_subcat_vis['pct_calculado'] = (df_subcat_vis['costo'] / total_mes * 100).round(2)
         
-        # ==== GRÁFICO ECHARTS INTERACTIVO ====
-        st.markdown("#### 📊 Evolución Interactiva con Pie Chart")
-        
-        # Obtener top 6 subcategorías del mes
-        top_subcats = df_subcat_vis.nlargest(6, 'costo')
-        subcats_lista = top_subcats['subcategoria'].tolist()
-        
-        # Obtener datos históricos
-        df_historico = get_subcategorias_historico(ano_actual, subcats_lista)
-        
-        if not df_historico.empty:
-            # Preparar dataset para ECharts
-            meses_lista = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 
-                          'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
-            
-            # Pivotar datos
-            df_pivot = df_historico.pivot(index='mes', columns='label', values='total').fillna(0)
-            
-            # Crear dataset source para ECharts
-            dataset_source = [['Mes'] + [col for col in df_pivot.columns]]
-            for mes_num in range(1, 13):
-                row = [meses_lista[mes_num-1]]
-                if mes_num in df_pivot.index:
-                    row.extend([int(df_pivot.loc[mes_num, col]) if col in df_pivot.columns else 0 
-                               for col in df_pivot.columns])
-                else:
-                    row.extend([0] * len(df_pivot.columns))
-                dataset_source.append(row)
-            
-            # Crear series dinámicas
-            series_lines = []
-            for i in range(len(df_pivot.columns)):
-                series_lines.append({
-                    "type": "line",
-                    "smooth": True,
-                    "seriesLayoutBy": "row",
-                    "emphasis": {"focus": "series"},
-                })
-            
-            # Agregar pie chart
-            series_lines.append({
-                "type": "pie",
-                "id": "pie",
-                "radius": "35%",
-                "center": ["50%", "30%"],
-                "emphasis": {"focus": "self"},
-                "label": {
-                    "formatter": "{b}: ${c} ({d}%)",
-                    "fontSize": 10
-                },
-                "encode": {
-                    "itemName": "Mes",
-                    "value": meses_lista[mes_tab2-1],
-                    "tooltip": meses_lista[mes_tab2-1]
-                },
-            })
-            
-            option = {
-                "legend": {"top": "5%"},
-                "tooltip": {
-                    "trigger": "axis",
-                    "showContent": False,
-                    "axisPointer": {"type": "cross"}
-                },
-                "dataset": {"source": dataset_source},
-                "xAxis": {"type": "category", "boundaryGap": False},
-                "yAxis": {
-                    "gridIndex": 0,
-                    "name": "Ingresos ($)",
-                    "axisLabel": {"formatter": "${value}"}
-                },
-                "grid": {"top": "60%", "left": "10%", "right": "10%"},
-                "series": series_lines,
-            }
-            
-            st_echarts(option, height="600px", key="echarts_interactivo")
-            
-            st.info("💡 **Tip:** Pasa el cursor sobre las líneas para ver cómo cambia el pie chart según el mes seleccionado.")
-        
-        st.divider()
-        
-        # Dos columnas para los gráficos estáticos lado a lado
+        # Dos columnas para los gráficos
         col_donut, col_sunburst = st.columns(2)
         
         with col_donut:
             st.markdown("#### Gráfico Donut - Mes Actual")
             
-            # Donut con ECharts
-            donut_data = [
-                {"value": int(row['costo']), "name": row['label_completo']}
-                for _, row in df_subcat_vis.iterrows()
-            ]
+            fig_donut = go.Figure(data=[go.Pie(
+                labels=df_subcat_vis['label_completo'],
+                values=df_subcat_vis['costo'],
+                hole=0.45,
+                textposition='auto',
+                hovertemplate='<b>%{label}</b><br>Total: $%{value:,.0f}<br>%{percent}<extra></extra>',
+                marker=dict(
+                    line=dict(color='white', width=3)
+                )
+            )])
             
-            donut_option = {
-                "title": {
-                    "text": f"{meses_nombres[mes_tab2-1]} {ano_actual}",
-                    "subtext": f"Total: ${total_mes:,.0f}",
-                    "left": "center",
-                    "textStyle": {"fontSize": 14},
-                    "subtextStyle": {"fontSize": 12}
-                },
-                "tooltip": {
-                    "trigger": "item",
-                    "formatter": "{b}<br/>Total: ${c}<br/>Porcentaje: {d}%"
-                },
-                "legend": {
-                    "type": "scroll",
-                    "orient": "vertical",
-                    "right": 10,
-                    "top": 60,
-                    "bottom": 20,
-                    "textStyle": {"fontSize": 9}
-                },
-                "series": [{
-                    "type": "pie",
-                    "radius": ["40%", "70%"],
-                    "center": ["40%", "55%"],
-                    "avoidLabelOverlap": True,
-                    "itemStyle": {
-                        "borderRadius": 10,
-                        "borderColor": "#fff",
-                        "borderWidth": 2
-                    },
-                    "label": {
-                        "show": True,
-                        "formatter": "{d}%",
-                        "fontSize": 10
-                    },
-                    "emphasis": {
-                        "label": {"show": True, "fontSize": 12, "fontWeight": "bold"},
-                        "itemStyle": {
-                            "shadowBlur": 15,
-                            "shadowOffsetX": 0,
-                            "shadowColor": "rgba(0, 0, 0, 0.5)"
-                        }
-                    },
-                    "data": donut_data
-                }]
-            }
+            fig_donut.update_layout(
+                title=dict(
+                    text=f"{meses_nombres[mes_tab2-1]} {ano_actual}",
+                    x=0.5,
+                    xanchor='center'
+                ),
+                annotations=[dict(
+                    text=f'<b>Total</b><br>${total_mes:,.0f}',
+                    x=0.5, y=0.5,
+                    font_size=14,
+                    showarrow=False
+                )],
+                showlegend=True,
+                legend=dict(
+                    orientation="v",
+                    yanchor="middle",
+                    y=0.5,
+                    xanchor="left",
+                    x=1.02,
+                    font=dict(size=9)
+                ),
+                height=550
+            )
             
-            st_echarts(donut_option, height="550px", key="echarts_donut")
+            st.plotly_chart(fig_donut, use_container_width=True)
         
         with col_sunburst:
             st.markdown("#### Vista Sunburst - Jerarquía")
             
-            # Preparar datos sunburst
-            categorias_agrupadas = df_subcat_vis.groupby('categoria').agg({
-                'costo': 'sum'
-            }).reset_index()
+            fig_sunburst = px.sunburst(
+                df_subcat_vis,
+                path=['categoria', 'subcategoria'],
+                values='costo',
+                color='costo',
+                color_continuous_scale='Viridis'
+            )
             
-            sunburst_data = []
-            for _, cat_row in categorias_agrupadas.iterrows():
-                categoria = cat_row['categoria']
-                subcats = df_subcat_vis[df_subcat_vis['categoria'] == categoria]
-                
-                children = []
-                for _, subcat_row in subcats.iterrows():
-                    children.append({
-                        "name": subcat_row['subcategoria'],
-                        "value": int(subcat_row['costo'])
-                    })
-                
-                sunburst_data.append({
-                    "name": categoria,
-                    "value": int(cat_row['costo']),
-                    "children": children
-                })
+            fig_sunburst.update_traces(
+                textinfo='label+percent parent',
+                hovertemplate='<b>%{label}</b><br>Total: $%{value:,.0f}<br>%{percentParent}<extra></extra>',
+                marker=dict(line=dict(color='white', width=2))
+            )
             
-            sunburst_option = {
-                "title": {
-                    "text": "Categorías → Subcategorías",
-                    "left": "center",
-                    "textStyle": {"fontSize": 14}
-                },
-                "tooltip": {
-                    "trigger": "item",
-                    "formatter": "{b}<br/>Total: ${c}<br/>Porcentaje: {d}%"
-                },
-                "series": [{
-                    "type": "sunburst",
-                    "data": sunburst_data,
-                    "radius": [0, "90%"],
-                    "label": {"rotate": "radial", "fontSize": 10},
-                    "itemStyle": {
-                        "borderRadius": 7,
-                        "borderWidth": 2,
-                        "borderColor": "#fff"
-                    },
-                    "emphasis": {"focus": "ancestor"}
-                }]
-            }
+            fig_sunburst.update_layout(
+                title=dict(
+                    text='Categorías → Subcategorías',
+                    x=0.5,
+                    xanchor='center'
+                ),
+                height=550
+            )
             
-            st_echarts(sunburst_option, height="550px", key="echarts_sunburst")
+            st.plotly_chart(fig_sunburst, use_container_width=True)
+        
     else:
         st.info("ℹ️ Sin datos de subcategorías")
 
@@ -952,22 +827,37 @@ with tab3:
     
     st.divider()
     
-    # GRÁFICO 2: EVOLUCIÓN DE SUBCATEGORÍAS (TOP 10)
-    st.subheader("🏷️ Evolución de Subcategorías (Top 10)")
+    # GRÁFICO 2: EVOLUCIÓN DE TODAS LAS SUBCATEGORÍAS
+    st.subheader("🏷️ Evolución de Todas las Subcategorías")
     
     df_evo_subcat = get_evolucion_subcategorias_ano(ano_actual)
     
     if not df_evo_subcat.empty:
-        # Obtener top 10 subcategorías por total anual
-        top_subcats_anual = df_evo_subcat.groupby('label')['total_mes'].sum().nlargest(10).index.tolist()
-        df_evo_subcat_top = df_evo_subcat[df_evo_subcat['label'].isin(top_subcats_anual)]
+        # Mostrar información sobre cuántas subcategorías hay
+        total_subcats = df_evo_subcat['label'].nunique()
+        st.info(f"📊 Mostrando evolución de **{total_subcats}** subcategorías diferentes")
+        
+        # Opción para filtrar por top N (opcional)
+        col_filtro1, col_filtro2 = st.columns([3, 9])
+        with col_filtro1:
+            mostrar_top = st.checkbox("Filtrar Top N", value=False, key="filtrar_top_subcat")
+        
+        if mostrar_top:
+            with col_filtro2:
+                top_n = st.slider("Cantidad a mostrar", min_value=5, max_value=50, value=20, step=5)
+            top_subcats_anual = df_evo_subcat.groupby('label')['total_mes'].sum().nlargest(top_n).index.tolist()
+            df_evo_subcat_filtrado = df_evo_subcat[df_evo_subcat['label'].isin(top_subcats_anual)]
+            st.caption(f"Mostrando top {top_n} subcategorías por ingresos totales del año")
+        else:
+            df_evo_subcat_filtrado = df_evo_subcat
+            st.caption("Mostrando todas las subcategorías")
         
         # Pivotar datos para el gráfico
-        df_subcat_pivot_cant = df_evo_subcat_top.pivot_table(
+        df_subcat_pivot_cant = df_evo_subcat_filtrado.pivot_table(
             index='mes', columns='label', values='cantidad',
             aggfunc='sum', fill_value=0
         )
-        df_subcat_pivot_total = df_evo_subcat_top.pivot_table(
+        df_subcat_pivot_total = df_evo_subcat_filtrado.pivot_table(
             index='mes', columns='label', values='total_mes',
             aggfunc='sum', fill_value=0
         )
@@ -1004,7 +894,7 @@ with tab3:
             xaxis_title="Mes",
             yaxis=dict(title="Cantidad de Trabajos"),
             hovermode='x unified',
-            height=500,
+            height=600,
             showlegend=True,
             legend=dict(
                 orientation="v",
@@ -1017,13 +907,14 @@ with tab3:
         
         st.plotly_chart(fig_subcat, use_container_width=True)
         
-        # Tabla resumen por subcategoría (Top 10)
-        st.markdown("#### Resumen Top 10 Subcategorías del Año")
-        resumen_subcat = df_evo_subcat_top.groupby('label').agg({
+        # Tabla resumen de todas las subcategorías
+        st.markdown("#### Resumen Completo de Subcategorías del Año")
+        resumen_subcat = df_evo_subcat.groupby('label').agg({
             'cantidad': 'sum',
             'total_mes': 'sum',
             'promedio_mes': 'mean'
-        }).reset_index().nlargest(10, 'total_mes')
+        }).reset_index().sort_values('total_mes', ascending=False)
+        
         resumen_subcat['cantidad_fmt'] = resumen_subcat['cantidad'].apply(lambda x: f"{int(x):,}")
         resumen_subcat['total_fmt'] = resumen_subcat['total_mes'].apply(lambda x: f"${int(x):,}")
         resumen_subcat['promedio_fmt'] = resumen_subcat['promedio_mes'].apply(lambda x: f"${int(x):,}")
