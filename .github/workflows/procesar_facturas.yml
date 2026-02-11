@@ -1,0 +1,134 @@
+name: Procesar Facturas Automático
+
+# ============================================
+# TRIGGERS - Cuándo se ejecuta
+# ============================================
+on:
+  # Ejecución manual (para pruebas)
+  workflow_dispatch:
+    inputs:
+      debug:
+        description: 'Activar modo debug'
+        required: false
+        default: 'false'
+  
+  # Ejecución automática diaria a las 20:00 hrs Chile (23:00 UTC)
+  # Chile está en UTC-3 (verano) o UTC-4 (invierno)
+  # Para 20:00 Chile → 23:00 UTC (horario de verano)
+  schedule:
+    - cron: '0 23 * * *'  # 20:00 Chile (UTC-3 verano)
+
+# ============================================
+# PERMISOS
+# ============================================
+permissions:
+  contents: write  # Necesario para hacer commit y push
+
+# ============================================
+# JOBS
+# ============================================
+jobs:
+  procesar-facturas:
+    runs-on: ubuntu-latest
+    
+    steps:
+      # ============================================
+      # 1. CHECKOUT - Descargar código del repo
+      # ============================================
+      - name: 📥 Checkout código
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Descargar historial completo
+      
+      # ============================================
+      # 2. SETUP PYTHON - Instalar Python 3.11
+      # ============================================
+      - name: 🐍 Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'  # Cachear dependencias
+      
+      # ============================================
+      # 3. INSTALAR DEPENDENCIAS
+      # ============================================
+      - name: 📦 Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      # ============================================
+      # 4. CONFIGURAR CREDENCIALES (desde Secrets)
+      # ============================================
+      - name: 🔐 Configurar credenciales Gmail
+        env:
+          GMAIL_TOKEN: ${{ secrets.GMAIL_TOKEN }}
+          GMAIL_CONFIG: ${{ secrets.GMAIL_CONFIG }}
+        run: |
+          echo "🔧 Configurando credenciales desde secrets..."
+          # Las credenciales se configuran automáticamente
+          # via variables de entorno que Rodenstock.py detecta
+      
+      # ============================================
+      # 5. EJECUTAR PROCESAMIENTO
+      # ============================================
+      - name: 🚀 Ejecutar Rodenstock.py
+        env:
+          GMAIL_TOKEN: ${{ secrets.GMAIL_TOKEN }}
+          GMAIL_CONFIG: ${{ secrets.GMAIL_CONFIG }}
+          GITHUB_ACTIONS: true
+          DEBUG: ${{ github.event.inputs.debug }}
+        run: |
+          echo "================================"
+          echo "🚀 Iniciando procesamiento..."
+          echo "📅 Fecha: $(date)"
+          echo "================================"
+          python scripts/Rodenstock.py
+      
+      # ============================================
+      # 6. COMMIT Y PUSH DE CAMBIOS
+      # ============================================
+      - name: 💾 Commit y push de cambios
+        run: |
+          echo "🔍 Verificando cambios..."
+          
+          # Configurar git
+          git config user.name "GitHub Actions Bot"
+          git config user.email "actions@github.com"
+          
+          # Agregar archivos que se actualizan
+          git add data/facturas.db
+          git add outputs/
+          git add last_processed.txt
+          git add processed_messages.json
+          
+          # Ver qué cambió
+          git status
+          
+          # Commit solo si hay cambios
+          if git diff --staged --quiet; then
+            echo "ℹ️  No hay cambios para commitear"
+          else
+            echo "✅ Cambios detectados, comiteando..."
+            git commit -m "auto: Facturas procesadas - $(date +'%Y-%m-%d %H:%M') UTC"
+            git push
+            echo "✅ Cambios subidos a GitHub"
+          fi
+      
+      # ============================================
+      # 7. RESUMEN (solo si hay falla)
+      # ============================================
+      - name: 📊 Resumen de ejecución
+        if: failure()
+        run: |
+          echo "❌ El procesamiento falló"
+          echo "📋 Revisa los logs arriba para ver el error"
+          exit 1
+
+# ============================================
+# NOTAS:
+# - El workflow se ejecuta a las 20:00 Chile
+# - Usa secrets GMAIL_TOKEN y GMAIL_CONFIG
+# - Commitea cambios automáticamente
+# - Puedes ejecutarlo manualmente en GitHub Actions
+# ============================================
