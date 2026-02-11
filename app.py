@@ -10,7 +10,7 @@ st.set_page_config(page_title="Dashboard Rodenstock", page_icon="📊", layout="
 
 import os
 
-DB_PATH = "facturas.db"
+DB_PATH = "data/facturas.db"
 
 # Verificar si existe la base de datos
 if not os.path.exists(DB_PATH):
