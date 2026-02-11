@@ -73,6 +73,7 @@ jobs:
       # 5. EJECUTAR PROCESAMIENTO
       # ============================================
       - name: 🚀 Ejecutar Rodenstock.py
+        id: procesar
         env:
           GMAIL_TOKEN: ${{ secrets.GMAIL_TOKEN }}
           GMAIL_CONFIG: ${{ secrets.GMAIL_CONFIG }}
@@ -84,11 +85,15 @@ jobs:
           echo "📅 Fecha: $(date)"
           echo "================================"
           python scripts/Rodenstock.py
+          
+          # Guardar código de salida
+          echo "exit_code=$?" >> $GITHUB_OUTPUT
       
       # ============================================
       # 6. COMMIT Y PUSH DE CAMBIOS
       # ============================================
       - name: 💾 Commit y push de cambios
+        id: commit
         run: |
           echo "🔍 Verificando cambios..."
           
@@ -108,27 +113,93 @@ jobs:
           # Commit solo si hay cambios
           if git diff --staged --quiet; then
             echo "ℹ️  No hay cambios para commitear"
+            echo "cambios=false" >> $GITHUB_OUTPUT
           else
             echo "✅ Cambios detectados, comiteando..."
             git commit -m "auto: Facturas procesadas - $(date +'%Y-%m-%d %H:%M') UTC"
             git push
             echo "✅ Cambios subidos a GitHub"
+            echo "cambios=true" >> $GITHUB_OUTPUT
           fi
       
       # ============================================
-      # 7. RESUMEN (solo si hay falla)
+      # 7. ENVIAR NOTIFICACIÓN POR EMAIL (ÉXITO)
+      # ============================================
+      - name: ✅ Enviar email de éxito
+        if: success()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.SMTP_EMAIL }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: ✅ Facturas procesadas exitosamente - ${{ github.run_number }}
+          to: ${{ secrets.NOTIFICATION_EMAIL }}
+          from: GitHub Actions <${{ secrets.SMTP_EMAIL }}>
+          body: |
+            ✅ El procesamiento de facturas se completó exitosamente
+            
+            📊 Detalles de ejecución:
+            • Fecha: ${{ github.event.repository.updated_at }}
+            • Workflow: ${{ github.workflow }}
+            • Ejecutado por: ${{ github.actor }}
+            • Tipo: ${{ github.event_name == 'schedule' && 'Automático (20:00 hrs)' || 'Manual' }}
+            • Cambios detectados: ${{ steps.commit.outputs.cambios }}
+            
+            🔗 Ver detalles completos:
+            ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            
+            ---
+            Este es un mensaje automático de GitHub Actions
+      
+      # ============================================
+      # 8. ENVIAR NOTIFICACIÓN POR EMAIL (ERROR)
+      # ============================================
+      - name: ❌ Enviar email de error
+        if: failure()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.SMTP_EMAIL }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: ❌ ERROR al procesar facturas - ${{ github.run_number }}
+          to: ${{ secrets.NOTIFICATION_EMAIL }}
+          from: GitHub Actions <${{ secrets.SMTP_EMAIL }}>
+          body: |
+            ❌ El procesamiento de facturas FALLÓ
+            
+            📊 Detalles del error:
+            • Fecha: ${{ github.event.repository.updated_at }}
+            • Workflow: ${{ github.workflow }}
+            • Ejecutado por: ${{ github.actor }}
+            • Tipo: ${{ github.event_name == 'schedule' && 'Automático (20:00 hrs)' || 'Manual' }}
+            
+            🔍 Acción requerida:
+            Revisa los logs para identificar el problema
+            
+            🔗 Ver logs completos:
+            ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            
+            ---
+            Este es un mensaje automático de GitHub Actions
+      
+      # ============================================
+      # 9. RESUMEN (solo si hay falla)
       # ============================================
       - name: 📊 Resumen de ejecución
         if: failure()
         run: |
           echo "❌ El procesamiento falló"
           echo "📋 Revisa los logs arriba para ver el error"
+          echo "📧 Se envió notificación por email"
           exit 1
 
 # ============================================
 # NOTAS:
 # - El workflow se ejecuta a las 20:00 Chile
-# - Usa secrets GMAIL_TOKEN y GMAIL_CONFIG
+# - Usa secrets: GMAIL_TOKEN, GMAIL_CONFIG, SMTP_EMAIL, SMTP_PASSWORD, NOTIFICATION_EMAIL
+# - Envía notificaciones por email en caso de éxito o error
 # - Commitea cambios automáticamente
 # - Puedes ejecutarlo manualmente en GitHub Actions
 # ============================================
