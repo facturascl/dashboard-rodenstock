@@ -1,6 +1,42 @@
-streamlit>=1.39.0
-pandas>=2.0.0
-plotly>=5.17.0
-numpy>=1.26.0
-openpyxl>=3.1.0
+# ============================================
+# RODENSTOCK - REQUIREMENTS
+# ============================================
+# Versión: 3.0
+# Fecha: 2025-02-10
+# ============================================
+
+# ============ Procesamiento de Gmail ============
+google-auth>=2.35.0
+google-auth-oauthlib>=1.2.1
+google-auth-httplib2>=0.2.0
+google-api-python-client>=2.125.0
+
+# ============ Procesamiento de PDFs ============
+pdfplumber>=0.11.4
+pypdfium2>=5.4.0
+
+# ============ Procesamiento de Datos ============
+pandas>=2.2.0
+openpyxl>=3.1.5
+numpy>=2.4.0
+
+# ============ Base de Datos SQLite ============
+# (sqlite3 viene incluido con Python)
+
+# ============ Variables de Entorno ============
+python-dotenv>=1.0.1
+
+# ============ Dashboard Streamlit ============
+streamlit>=1.54.0
+plotly>=5.24.0
 streamlit-echarts>=0.4.0
+
+# ============ Utilidades ============
+requests>=2.32.0
+
+# ============================================
+# NOTAS:
+# - Estas versiones son las mínimas requeridas
+# - GitHub Actions instalará las últimas versiones compatibles
+# - Las sub-dependencias se instalan automáticamente
+# ============================================

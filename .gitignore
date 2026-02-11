@@ -1,17 +1,61 @@
-# Virtual Environment
+# ============ Python - Bytecode ============
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# ============ Entornos virtuales ============
 venv/
 env/
 ENV/
 .venv
 
-# Archivos de SO
-.DS_Store
-Thumbs.db
-*.pyc
-__pycache__/
-*.egg-info/
-
-# IDE
+# ============ IDEs ============
 .vscode/
 .idea/
 *.swp
+*.swo
+*~
+
+# ============ Sistema Operativo ============
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# ============ Credenciales (CRÍTICO - NO SUBIR) ============
+# Estos archivos van como GitHub Secrets
+token.json
+.streamlit/config.toml
+config/credentials.json
+.streamlit/secrets.toml
+.env
+
+# ============ Archivos Temporales ============
+# PDFs descargados (se borran después de procesar)
+pdf_attachments/
+*.pdf
+
+# Caché local
+*.log
+*.tmp
+
+# ============ Archivos que SÍ queremos en el repo ============
+# Estos archivos NO están en .gitignore porque son parte del proyecto:
+# - data/facturas.db              ✅ Base de datos (se actualiza con commits)
+# - last_processed.txt            ✅ Estado del procesamiento
+# - processed_messages.json       ✅ Mensajes ya procesados
+# - outputs/*.jsonl               ✅ JSONLs intermedios (opcional, por ahora los subimos)
+# - scripts/libreria.xlsx         ✅ Archivo de clasificación
+
+# Si en el futuro quieres IGNORAR los JSONLs intermedios, descomenta:
+# outputs/*.jsonl
+
+# ============ Testing ============
+.pytest_cache/
+.coverage
+htmlcov/
+*.cover
