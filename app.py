@@ -18,7 +18,6 @@ if not os.path.exists(DB_PATH):
     st.info("📁 Archivos en directorio actual: " + ", ".join(os.listdir(".")))
     st.stop()
 else:
-    # Mostrar info de la BD solo en desarrollo (puedes comentar esto después)
     file_size = os.path.getsize(DB_PATH)
     st.sidebar.success(f"✅ BD encontrada ({file_size:,} bytes)")
 
@@ -28,7 +27,6 @@ def get_db_connection():
         conn = sqlite3.connect(DB_PATH, timeout=10.0, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         
-        # Verificar que hay datos
         cursor = conn.cursor()
         cursor.execute("SELECT COUNT(*) as total FROM facturas")
         total_facturas = cursor.fetchone()[0]
@@ -71,10 +69,8 @@ try:
     anos_df = pd.read_sql_query(anos_query, conn)
     anos_disponibles = sorted(anos_df['ano'].tolist(), reverse=True) if not anos_df.empty else [2025]
     
-    # Diagnóstico: mostrar años disponibles
     st.sidebar.write("📅 Años con datos:", anos_disponibles)
     
-    # Diagnóstico: contar facturas por año
     count_query = """
         SELECT 
             CAST(STRFTIME('%Y', fechaemision) AS INTEGER) as ano,
@@ -88,7 +84,6 @@ try:
     st.sidebar.write("📊 Facturas por año:")
     st.sidebar.dataframe(count_df, hide_index=True)
     
-    # Selector de año actual
     ano_actual = st.sidebar.selectbox("📅 Año Actual", anos_disponibles, index=0, key="ano_actual")
     
 except Exception as e:
@@ -96,7 +91,7 @@ except Exception as e:
     st.stop()
 
 # ============================================================
-# FUNCIONES DE CONSULTA
+# FUNCIONES DE CONSULTA - FACTURAS
 # ============================================================
 
 @st.cache_data(ttl=300)
@@ -177,55 +172,6 @@ def get_subcategorias_completo_mes(ano, mes):
     FROM resumen_categorias rc
     CROSS JOIN totales_mes tm
     ORDER BY rc.total_dinero DESC
-    """
-    return pd.read_sql_query(query, conn)
-
-@st.cache_data(ttl=300)
-def get_subcategorias_historico(ano, subcategorias_lista):
-    """Obtener histórico de subcategorías específicas a lo largo del año."""
-    if not subcategorias_lista:
-        return pd.DataFrame()
-    
-    subcats_str = "', '".join(subcategorias_lista)
-    query = f"""
-    WITH facturas_clasif AS (
-      SELECT
-        f.numerofactura,
-        CAST(STRFTIME('%Y', f.fechaemision) AS INTEGER) AS ano,
-        CAST(STRFTIME('%m', f.fechaemision) AS INTEGER) AS mes,
-        CASE 
-          WHEN lf.clasificacion_categoria IS NULL 
-               OR lf.clasificacion_categoria = 'Sin clasificacion' 
-               OR TRIM(lf.clasificacion_categoria) = ''
-            THEN 'Otros'
-          ELSE lf.clasificacion_categoria
-        END AS categoria,
-        COALESCE(lf.clasificacion_subcategoria, '') AS subcategoria,
-        COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0) AS total_factura
-      FROM lineas_factura lf
-      INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
-      WHERE f.fechaemision IS NOT NULL
-    ),
-    facturas_unicas AS (
-      SELECT
-        numerofactura,
-        ano,
-        mes,
-        categoria,
-        MIN(subcategoria) AS subcategoria,
-        MAX(total_factura) AS total_factura
-      FROM facturas_clasif
-      WHERE subcategoria IN ('{subcats_str}')
-      GROUP BY numerofactura, ano, mes, categoria
-    )
-    SELECT
-      mes,
-      categoria || ' - ' || subcategoria as label,
-      CAST(SUM(total_factura) AS INTEGER) AS total
-    FROM facturas_unicas
-    WHERE ano = {ano}
-    GROUP BY mes, label
-    ORDER BY mes, label
     """
     return pd.read_sql_query(query, conn)
 
@@ -319,35 +265,90 @@ def get_evolucion_subcategorias_ano(ano):
     """
     return pd.read_sql_query(query, conn)
 
+# ============================================================
+# FUNCIONES DE CONSULTA - NOTAS DE CRÉDITO
+# ============================================================
+
 @st.cache_data(ttl=300)
-def get_newton_rango(fecha_inicio, fecha_fin):
-    """Newton vs Newton Plus con rango de fechas."""
+def get_notas_credito_12_meses(ano):
+    """Comparativa de 12 meses de notas de crédito: cantidad + dinero."""
     query = f"""
-    WITH newton_data AS (
+    SELECT 
+        CAST(STRFTIME('%m', fechaemision) AS INTEGER) as mes,
+        COUNT(DISTINCT numeronota) as cantidad_notas,
+        CAST(SUM(total + iva) AS INTEGER) as total_dinero
+    FROM notascredito
+    WHERE CAST(STRFTIME('%Y', fechaemision) AS INTEGER) = {int(ano)}
+    AND fechaemision IS NOT NULL
+    GROUP BY mes
+    ORDER BY mes
+    """
+    return pd.read_sql_query(query, conn)
+
+@st.cache_data(ttl=300)
+def get_notas_credito_categorias_mes(ano, mes):
+    """Desglose de notas de crédito por categoría para un mes específico."""
+    query = f"""
+    WITH notas_clasif AS (
       SELECT
-        STRFTIME('%Y-%m-%d', f.fechaemision) as fecha,
+        nc.numeronota,
+        CAST(STRFTIME('%Y', nc.fechaemision) AS INTEGER) AS ano,
+        CAST(STRFTIME('%m', nc.fechaemision) AS INTEGER) AS mes,
         CASE 
-          WHEN lf.clasificacion_categoria = 'Newton' THEN 'Newton' 
-          WHEN lf.clasificacion_categoria = 'Newton Plus' THEN 'Newton Plus'
-          ELSE 'Otro'
-        END as tipo,
-        f.numerofactura,
-        COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0) AS total_factura
-      FROM lineas_factura lf
-      INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
-      WHERE f.fechaemision BETWEEN '{fecha_inicio}' AND '{fecha_fin}'
-      AND lf.clasificacion_categoria IN ('Newton', 'Newton Plus')
-      AND f.fechaemision IS NOT NULL
+          WHEN ln.clasificacion_categoria IS NULL 
+               OR ln.clasificacion_categoria = 'Sin clasificacion' 
+               OR TRIM(ln.clasificacion_categoria) = ''
+            THEN 'Otros'
+          ELSE ln.clasificacion_categoria
+        END AS categoria,
+        COALESCE(ln.clasificacion_subcategoria, '') AS subcategoria,
+        COALESCE(nc.total, 0) + COALESCE(nc.iva, 0) AS total_nota
+      FROM lineas_notas ln
+      INNER JOIN notascredito nc ON ln.numeronota = nc.numeronota
+      WHERE nc.fechaemision IS NOT NULL
+    ),
+    notas_unicas AS (
+      SELECT
+        numeronota,
+        ano,
+        mes,
+        categoria,
+        MIN(subcategoria) AS subcategoria,
+        MAX(total_nota) AS total_nota
+      FROM notas_clasif
+      GROUP BY numeronota, ano, mes, categoria
+    ),
+    resumen_categorias AS (
+      SELECT
+        ano,
+        mes,
+        categoria,
+        subcategoria,
+        COUNT(*) AS cantidad_notas,
+        GROUP_CONCAT(numeronota, ', ') AS numeros_nota,
+        SUM(total_nota) AS total_dinero,
+        AVG(total_nota) AS promedio_nota
+      FROM notas_unicas
+      WHERE ano = {ano} AND mes = {mes}
+      GROUP BY categoria, subcategoria
+    ),
+    totales_mes AS (
+      SELECT
+        SUM(total_dinero) AS total_mes,
+        SUM(cantidad_notas) AS total_notas
+      FROM resumen_categorias
     )
     SELECT
-      fecha,
-      tipo,
-      COUNT(DISTINCT numerofactura) as cantidad,
-      CAST(SUM(total_factura) AS INTEGER) as total_diario,
-      CAST(AVG(total_factura) AS INTEGER) as promedio_diario
-    FROM newton_data
-    GROUP BY fecha, tipo
-    ORDER BY fecha DESC, tipo
+      rc.categoria,
+      rc.subcategoria,
+      rc.cantidad_notas AS cantidad,
+      rc.numeros_nota,
+      CAST(rc.total_dinero AS INTEGER) AS costo,
+      CAST(rc.promedio_nota AS INTEGER) AS promedio,
+      ROUND((rc.total_dinero / tm.total_mes) * 100, 2) AS pct
+    FROM resumen_categorias rc
+    CROSS JOIN totales_mes tm
+    ORDER BY rc.total_dinero DESC
     """
     return pd.read_sql_query(query, conn)
 
@@ -358,17 +359,17 @@ tab1, tab2, tab3, tab4 = st.tabs([
     "📊 Comparativa Anual",
     "🏷️ Desglose Subcategorías",
     "📈 Evolución Mensual",
-    "🔵 Newton vs Plus"
+    "📋 Notas de Crédito"
 ])
+
+meses_nombres = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun',
+                 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
 
 # ============================================================
 # TAB 1: COMPARATIVA ANUAL (12 MESES)
 # ============================================================
 with tab1:
     st.header("📊 Comparativa de Años")
-    
-    meses_nombres = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun',
-                     'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
     
     # PARTE 1: AÑO ACTUAL
     st.subheader(f"📅 Año {ano_actual} - Vista Actual")
@@ -402,7 +403,6 @@ with tab1:
         marker=dict(size=10),
         hovertemplate='<b>%{x}</b><br>Total: $%{y:,.0f}<extra></extra>'
     ))
-    # Línea de promedio mensual por factura
     fig_actual.add_trace(go.Scatter(
         x=[meses_nombres[i-1] for i in df_comp_actual_full['mes']],
         y=df_comp_actual_full['promedio'],
@@ -500,7 +500,7 @@ with tab1:
         fig1.add_trace(go.Scatter(
             x=[meses_nombres[i-1] for i in df_comp1_full['mes']],
             y=df_comp1_full['promedio'],
-            name='Promedio Mensual por Factura ($)',
+            name='Promedio',
             yaxis='y2',
             mode='lines',
             line=dict(color='rgba(0,0,0,0.6)', width=2, dash='dash'),
@@ -541,7 +541,7 @@ with tab1:
             fig2.add_trace(go.Scatter(
                 x=[meses_nombres[i-1] for i in df_comp2_full['mes']],
                 y=df_comp2_full['promedio'],
-                name='Promedio Mensual por Factura ($)',
+                name='Promedio',
                 yaxis='y2',
                 mode='lines',
                 line=dict(color='rgba(0,0,0,0.6)', width=2, dash='dash'),
@@ -654,12 +654,10 @@ with tab2:
         
         st.subheader("Distribución por Categoría y Subcategoría")
         
-        # Crear DataFrame para visualización
         df_subcat_vis = df_subcat.copy()
         df_subcat_vis['label_completo'] = df_subcat_vis['categoria'] + ' - ' + df_subcat_vis['subcategoria']
         total_mes = df_subcat_vis['costo'].sum()
         
-        # Dos columnas para los gráficos
         col_donut, col_sunburst = st.columns(2)
         
         with col_donut:
@@ -671,17 +669,11 @@ with tab2:
                 hole=0.45,
                 textposition='auto',
                 hovertemplate='<b>%{label}</b><br>Total: $%{value:,.0f}<br>%{percent}<extra></extra>',
-                marker=dict(
-                    line=dict(color='white', width=3)
-                )
+                marker=dict(line=dict(color='white', width=3))
             )])
             
             fig_donut.update_layout(
-                title=dict(
-                    text=f"{meses_nombres[mes_tab2-1]} {ano_actual}",
-                    x=0.5,
-                    xanchor='center'
-                ),
+                title=dict(text=f"{meses_nombres[mes_tab2-1]} {ano_actual}", x=0.5, xanchor='center'),
                 annotations=[dict(
                     text=f'<b>Total</b><br>${total_mes:,.0f}',
                     x=0.5, y=0.5,
@@ -689,14 +681,7 @@ with tab2:
                     showarrow=False
                 )],
                 showlegend=True,
-                legend=dict(
-                    orientation="v",
-                    yanchor="middle",
-                    y=0.5,
-                    xanchor="left",
-                    x=1.02,
-                    font=dict(size=9)
-                ),
+                legend=dict(orientation="v", yanchor="middle", y=0.5, xanchor="left", x=1.02, font=dict(size=9)),
                 height=550
             )
             
@@ -720,11 +705,7 @@ with tab2:
             )
             
             fig_sunburst.update_layout(
-                title=dict(
-                    text='Categorías → Subcategorías',
-                    x=0.5,
-                    xanchor='center'
-                ),
+                title=dict(text='Categorías → Subcategorías', x=0.5, xanchor='center'),
                 height=550
             )
             
@@ -739,13 +720,11 @@ with tab2:
 with tab3:
     st.header(f"📈 Evolución Mensual - Año {ano_actual}")
     
-    # GRÁFICO 1: EVOLUCIÓN DE CATEGORÍAS
     st.subheader("📊 Evolución de Categorías")
     
     df_evo_cat = get_evolucion_categorias_ano(ano_actual)
     
     if not df_evo_cat.empty:
-        # Pivotar datos para el gráfico
         df_cat_pivot_cant = df_evo_cat.pivot_table(
             index='mes', columns='categoria', values='cantidad',
             aggfunc='sum', fill_value=0
@@ -755,7 +734,6 @@ with tab3:
             aggfunc='sum', fill_value=0
         )
         
-        # Asegurar que tenemos todos los 12 meses
         for mes in range(1, 13):
             if mes not in df_cat_pivot_cant.index:
                 df_cat_pivot_cant.loc[mes] = 0
@@ -767,7 +745,6 @@ with tab3:
         
         fig_cat = go.Figure()
         
-        # UNA línea por categoría mostrando cantidad, con total en tooltip
         for col in df_cat_pivot_cant.columns:
             fig_cat.add_trace(go.Scatter(
                 x=[meses_nombres[m-1] for m in df_cat_pivot_cant.index],
@@ -777,10 +754,7 @@ with tab3:
                 line=dict(width=3),
                 marker=dict(size=8),
                 customdata=df_cat_pivot_total[col],
-                hovertemplate='<b>%{x}</b><br>' +
-                              '<b>' + col + '</b><br>' +
-                              'Cantidad: %{y:,.0f} | Total: $%{customdata:,.0f}' +
-                              '<extra></extra>'
+                hovertemplate='<b>%{x}</b><br><b>' + col + '</b><br>Cantidad: %{y:,.0f} | Total: $%{customdata:,.0f}<extra></extra>'
             ))
         
         fig_cat.update_layout(
@@ -789,18 +763,11 @@ with tab3:
             hovermode='x unified',
             height=500,
             showlegend=True,
-            legend=dict(
-                orientation="v",
-                yanchor="top",
-                y=1,
-                xanchor="left",
-                x=1.02
-            )
+            legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02)
         )
         
         st.plotly_chart(fig_cat, use_container_width=True)
         
-        # Tabla resumen por categoría
         st.markdown("#### Resumen por Categoría")
         resumen_cat = df_evo_cat.groupby('categoria').agg({
             'cantidad': 'sum',
@@ -827,17 +794,14 @@ with tab3:
     
     st.divider()
     
-    # GRÁFICO 2: EVOLUCIÓN DE TODAS LAS SUBCATEGORÍAS
     st.subheader("🏷️ Evolución de Todas las Subcategorías")
     
     df_evo_subcat = get_evolucion_subcategorias_ano(ano_actual)
     
     if not df_evo_subcat.empty:
-        # Mostrar información sobre cuántas subcategorías hay
         total_subcats = df_evo_subcat['label'].nunique()
         st.info(f"📊 Mostrando evolución de **{total_subcats}** subcategorías diferentes")
         
-        # Opción para filtrar por top N (opcional)
         col_filtro1, col_filtro2 = st.columns([3, 9])
         with col_filtro1:
             mostrar_top = st.checkbox("Filtrar Top N", value=False, key="filtrar_top_subcat")
@@ -852,7 +816,6 @@ with tab3:
             df_evo_subcat_filtrado = df_evo_subcat
             st.caption("Mostrando todas las subcategorías")
         
-        # Pivotar datos para el gráfico
         df_subcat_pivot_cant = df_evo_subcat_filtrado.pivot_table(
             index='mes', columns='label', values='cantidad',
             aggfunc='sum', fill_value=0
@@ -862,7 +825,6 @@ with tab3:
             aggfunc='sum', fill_value=0
         )
         
-        # Asegurar que tenemos todos los 12 meses
         for mes in range(1, 13):
             if mes not in df_subcat_pivot_cant.index:
                 df_subcat_pivot_cant.loc[mes] = 0
@@ -874,7 +836,6 @@ with tab3:
         
         fig_subcat = go.Figure()
         
-        # UNA línea por subcategoría mostrando cantidad, con total en tooltip
         for col in df_subcat_pivot_cant.columns:
             fig_subcat.add_trace(go.Scatter(
                 x=[meses_nombres[m-1] for m in df_subcat_pivot_cant.index],
@@ -884,10 +845,7 @@ with tab3:
                 line=dict(width=3),
                 marker=dict(size=8),
                 customdata=df_subcat_pivot_total[col],
-                hovertemplate='<b>%{x}</b><br>' +
-                              '<b>' + col + '</b><br>' +
-                              'Cantidad: %{y:,.0f} | Total: $%{customdata:,.0f}' +
-                              '<extra></extra>'
+                hovertemplate='<b>%{x}</b><br><b>' + col + '</b><br>Cantidad: %{y:,.0f} | Total: $%{customdata:,.0f}<extra></extra>'
             ))
         
         fig_subcat.update_layout(
@@ -896,18 +854,11 @@ with tab3:
             hovermode='x unified',
             height=600,
             showlegend=True,
-            legend=dict(
-                orientation="v",
-                yanchor="top",
-                y=1,
-                xanchor="left",
-                x=1.02
-            )
+            legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02)
         )
         
         st.plotly_chart(fig_subcat, use_container_width=True)
         
-        # Tabla resumen de todas las subcategorías
         st.markdown("#### Resumen Completo de Subcategorías del Año")
         resumen_subcat = df_evo_subcat.groupby('label').agg({
             'cantidad': 'sum',
@@ -934,79 +885,127 @@ with tab3:
         st.info("ℹ️ Sin datos de subcategorías para este año")
 
 # ============================================================
-# TAB 4: NEWTON VS NEWTON PLUS
+# TAB 4: NOTAS DE CRÉDITO
 # ============================================================
 with tab4:
-    st.header("🔵 Newton vs Newton Plus")
+    st.header("📋 Notas de Crédito")
     
-    col1, col2 = st.columns(2)
-    with col1:
-        fecha_inicio = st.date_input(
-            "📅 Fecha Inicio",
-            value=pd.to_datetime(f"{ano_actual}-01-01"),
-            key="newton_inicio"
-        )
-    with col2:
-        fecha_fin = st.date_input(
-            "📅 Fecha Fin",
-            value=pd.to_datetime(f"{ano_actual}-12-31"),
-            key="newton_fin"
-        )
+    st.subheader(f"📅 Año {ano_actual} - Evolución Mensual")
     
-    df_newton = get_newton_rango(
-        fecha_inicio.strftime('%Y-%m-%d'),
-        fecha_fin.strftime('%Y-%m-%d')
-    )
+    df_notas = get_notas_credito_12_meses(ano_actual)
     
-    if not df_newton.empty:
-        df_newton_pivot_cant = df_newton.pivot_table(
-            index='fecha', columns='tipo', values='cantidad',
-            aggfunc='sum', fill_value=0
-        )
-        df_newton_pivot_prom = df_newton.pivot_table(
-            index='fecha', columns='tipo', values='promedio_diario',
-            aggfunc='first', fill_value=0
-        )
+    if not df_notas.empty:
+        df_notas_full = pd.DataFrame({'mes': range(1, 13)})
+        df_notas_full = df_notas_full.merge(df_notas, on='mes', how='left').fillna(0)
+        df_notas_full['cantidad_notas'] = df_notas_full['cantidad_notas'].astype(int)
+        df_notas_full['total_dinero'] = df_notas_full['total_dinero'].astype(int)
+        df_notas_full['promedio'] = (
+            df_notas_full['total_dinero'] /
+            df_notas_full['cantidad_notas'].replace(0, 1)
+        ).fillna(0).astype(int)
         
-        fig = go.Figure()
-        
-        # Barras para cantidad
-        for col in df_newton_pivot_cant.columns:
-            fig.add_trace(go.Bar(
-                x=df_newton_pivot_cant.index,
-                y=df_newton_pivot_cant[col],
-                name=f"{col} (Cantidad)",
-                yaxis='y1',
-                opacity=0.7,
-                hovertemplate='<b>%{x}</b><br>' + col +
-                              ' Cantidad: %{y:,.0f}<extra></extra>'
-            ))
-        
-        # Líneas para promedio diario
-        for col in df_newton_pivot_prom.columns:
-            fig.add_trace(go.Scatter(
-                x=df_newton_pivot_prom.index,
-                y=df_newton_pivot_prom[col],
-                name=f"{col} (Promedio Diario)",
-                yaxis='y2',
-                mode='lines+markers',
-                line=dict(width=2),
-                hovertemplate='<b>%{x}</b><br>' + col +
-                              ' Promedio Diario: $%{y:,.0f}<extra></extra>'
-            ))
-        
-        fig.update_layout(
-            xaxis_title="Fecha",
-            yaxis=dict(title="Cantidad", side='left'),
-            yaxis2=dict(title="Promedio Diario ($)", overlaying='y', side='right'),
+        # Gráfico
+        fig_notas = go.Figure()
+        fig_notas.add_trace(go.Bar(
+            x=[meses_nombres[i-1] for i in df_notas_full['mes']],
+            y=df_notas_full['cantidad_notas'],
+            name='Cantidad de Notas',
+            yaxis='y1',
+            marker=dict(color='rgba(255, 107, 107, 0.7)'),
+            hovertemplate='<b>%{x}</b><br>Notas: %{y:,.0f}<extra></extra>'
+        ))
+        fig_notas.add_trace(go.Scatter(
+            x=[meses_nombres[i-1] for i in df_notas_full['mes']],
+            y=df_notas_full['total_dinero'],
+            name='Total en Dinero ($)',
+            yaxis='y2',
+            mode='lines+markers',
+            line=dict(color='#FF6B6B', width=3),
+            marker=dict(size=10),
+            hovertemplate='<b>%{x}</b><br>Total: $%{y:,.0f}<extra></extra>'
+        ))
+        fig_notas.add_trace(go.Scatter(
+            x=[meses_nombres[i-1] for i in df_notas_full['mes']],
+            y=df_notas_full['promedio'],
+            name='Promedio por Nota ($)',
+            yaxis='y2',
+            mode='lines',
+            line=dict(color='rgba(0,0,0,0.6)', width=2, dash='dash'),
+            hovertemplate='<b>%{x}</b><br>Promedio: $%{y:,.0f}<extra></extra>'
+        ))
+        fig_notas.update_layout(
+            xaxis_title="Mes",
+            yaxis=dict(title="Cantidad de Notas", side='left'),
+            yaxis2=dict(title="Total / Promedio ($)", overlaying='y', side='right'),
             hovermode='x unified',
-            height=500,
+            height=400,
             showlegend=True
         )
+        st.plotly_chart(fig_notas, use_container_width=True)
         
-        st.plotly_chart(fig, use_container_width=True)
+        # Tabla
+        st.subheader("📋 Detalle Mensual")
+        tabla_notas = df_notas_full.copy()
+        tabla_notas['mes_nombre'] = [meses_nombres[i-1] for i in tabla_notas['mes']]
+        tabla_notas['cantidad_notas_fmt'] = tabla_notas['cantidad_notas'].apply(lambda x: f"{int(x):,}")
+        tabla_notas['total_dinero_fmt'] = tabla_notas['total_dinero'].apply(lambda x: f"${int(x):,}")
+        tabla_notas['promedio_fmt'] = tabla_notas['promedio'].apply(lambda x: f"${int(x):,}")
+        st.dataframe(
+            tabla_notas[['mes_nombre', 'cantidad_notas_fmt', 'total_dinero_fmt', 'promedio_fmt']],
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "mes_nombre": st.column_config.TextColumn("Mes", width=80),
+                "cantidad_notas_fmt": st.column_config.TextColumn("Notas", width=100),
+                "total_dinero_fmt": st.column_config.TextColumn("Total ($)", width=130),
+                "promedio_fmt": st.column_config.TextColumn("Promedio/Nota ($)", width=150),
+            }
+        )
+        
+        # Métricas del año
+        st.divider()
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Total Notas del Año", f"{df_notas_full['cantidad_notas'].sum():,}")
+        with col2:
+            st.metric("Monto Total Anual", f"${df_notas_full['total_dinero'].sum():,}")
+        with col3:
+            promedio_anual = int(df_notas_full['total_dinero'].sum() / df_notas_full['cantidad_notas'].sum()) if df_notas_full['cantidad_notas'].sum() > 0 else 0
+            st.metric("Promedio Anual", f"${promedio_anual:,}")
+        
+        # Desglose por mes (opcional)
+        st.divider()
+        st.subheader("🔍 Desglose por Mes y Categoría")
+        
+        mes_detalle = st.selectbox(
+            "Selecciona un mes para ver el desglose",
+            range(1, 13),
+            format_func=lambda x: meses_nombres[x-1],
+            key="mes_detalle_notas"
+        )
+        
+        df_notas_cat = get_notas_credito_categorias_mes(ano_actual, mes_detalle)
+        
+        if not df_notas_cat.empty:
+            st.dataframe(
+                df_notas_cat[['categoria', 'subcategoria', 'cantidad', 'numeros_nota', 'costo', 'promedio', 'pct']],
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "categoria": st.column_config.TextColumn("Categoría", width=150),
+                    "subcategoria": st.column_config.TextColumn("Subcategoría", width=150),
+                    "cantidad": st.column_config.NumberColumn("Cantidad", width=80),
+                    "numeros_nota": st.column_config.TextColumn("Nº Notas", width=200),
+                    "costo": st.column_config.NumberColumn("Total ($)", width=120, format="$%d"),
+                    "promedio": st.column_config.NumberColumn("Promedio ($)", width=120, format="$%d"),
+                    "pct": st.column_config.NumberColumn("% Total", width=80, format="%.2f%%"),
+                }
+            )
+        else:
+            st.info(f"ℹ️ Sin notas de crédito para {meses_nombres[mes_detalle-1]} {ano_actual}")
+        
     else:
-        st.info("ℹ️ Sin datos Newton/Newton Plus en este rango")
+        st.info(f"ℹ️ Sin notas de crédito para el año {ano_actual}")
 
 # ============================================================
 # PIE DE PÁGINA
