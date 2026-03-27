@@ -29,7 +29,7 @@ Thumbs.db
 # ============ Credenciales (CRÍTICO - NO SUBIR) ============
 # Estos archivos van como GitHub Secrets
 token.json
-.streamlit/config.toml
+#.streamlit/config.toml
 config/credentials.json
 .streamlit/secrets.toml
 .env
