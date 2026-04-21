@@ -25,6 +25,7 @@ if not os.path.exists(DB_PATH):
     st.stop()
 else:
     file_size = os.path.getsize(DB_PATH)
+    st.sidebar.success(f"✅ BD encontrada ({file_size:,} bytes)")
 
 @st.cache_resource
 def get_db_connection():
@@ -38,6 +39,8 @@ def get_db_connection():
         
         if total_facturas == 0:
             st.error("⚠️ La base de datos está vacía")
+        else:
+            st.sidebar.info(f"📊 Total facturas en BD: {total_facturas:,}")
             
         return conn
     except Exception as e:
@@ -59,7 +62,7 @@ if conn is None:
     st.stop()
 
 # ============================================================
-# SIDEBAR - FILTROS PRINCIPALES -
+# SIDEBAR - FILTROS PRINCIPALES
 # ============================================================
 st.sidebar.title("🔧 Filtros")
 
@@ -71,9 +74,24 @@ try:
     """
     anos_df = pd.read_sql_query(anos_query, conn)
     anos_disponibles = sorted(anos_df['ano'].tolist(), reverse=True) if not anos_df.empty else [2025]
-
+    
+    st.sidebar.write("📅 Años con datos:", anos_disponibles)
+    
+    count_query = """
+        SELECT 
+            CAST(STRFTIME('%Y', fechaemision) AS INTEGER) as ano,
+            COUNT(*) as total
+        FROM facturas 
+        WHERE fechaemision IS NOT NULL
+        GROUP BY ano
+        ORDER BY ano DESC
+    """
+    count_df = pd.read_sql_query(count_query, conn)
+    st.sidebar.write("📊 Facturas por año:")
+    st.sidebar.dataframe(count_df, hide_index=True)
+    
     ano_actual = st.sidebar.selectbox("📅 Año Actual", anos_disponibles, index=0, key="ano_actual")
-
+    
 except Exception as e:
     st.error(f"Error al cargar años: {e}")
     st.stop()

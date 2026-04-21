@@ -44,15 +44,6 @@ def get_db_connection():
         st.error(f"❌ Error BD: {e}")
         return None
 
-# ============================================================
-# BOTÓN PARA LIMPIAR CACHÉ Y FORZAR ACTUALIZACIÓN
-# ============================================================
-col_refresh, col_space = st.columns([1, 10])
-with col_refresh:
-    if st.button("🔄 Actualizar Datos", key="btn_refresh", help="Fuerza recarga de la BD"):
-        st.cache_resource.clear()
-        st.cache_data.clear()
-        st.rerun()
 
 conn = get_db_connection()
 if conn is None:
@@ -87,6 +78,13 @@ Salta a cualquier sección:
 - [📈 Evolución](#evolucion-mensual)
 - [📋 Notas de Crédito](#notas-de-credito)
 """)
+
+st.sidebar.divider()
+st.sidebar.subheader("⚙️ Mantenimiento")
+if st.sidebar.button("🔄 Actualizar Datos", key="btn_refresh", help="Fuerza recarga de la BD", use_container_width=True):
+    st.cache_resource.clear()
+    st.cache_data.clear()
+    st.rerun()
 
 # ============================================================
 # FUNCIONES DE CONSULTA - FACTURAS
@@ -648,59 +646,57 @@ if not df_subcat.empty:
     df_subcat_vis = df_subcat.copy()
     df_subcat_vis['label_completo'] = df_subcat_vis['categoria'] + ' - ' + df_subcat_vis['subcategoria']
     
-    col_donut, col_sunburst = st.columns(2)
+    st.markdown("#### Gráfico Donut - Mes Actual")
     
-    with col_donut:
-        st.markdown("#### Gráfico Donut - Mes Actual")
-        
-        fig_donut = go.Figure(data=[go.Pie(
-            labels=df_subcat_vis['label_completo'],
-            values=df_subcat_vis['costo'],
-            hole=0.45,
-            textposition='auto',
-            hovertemplate='<b>%{label}</b><br>Total: $%{value:,.0f}<br>%{percent}<extra></extra>',
-            marker=dict(line=dict(color='white', width=3))
-        )])
-        
-        total_mes = df_subcat_vis['costo'].sum()
-        fig_donut.update_layout(
-            title=dict(text=f"{meses_nombres[mes_tab2-1]} {ano_actual}", x=0.5, xanchor='center'),
-            annotations=[dict(
-                text=f'<b>Total</b><br>${total_mes:,.0f}',
-                x=0.5, y=0.5,
-                font_size=14,
-                showarrow=False
-            )],
-            showlegend=True,
-            legend=dict(orientation="v", yanchor="middle", y=0.5, xanchor="left", x=1.02, font=dict(size=9)),
-            height=550
-        )
-        
-        st.plotly_chart(fig_donut, use_container_width=True)
+    fig_donut = go.Figure(data=[go.Pie(
+        labels=df_subcat_vis['label_completo'],
+        values=df_subcat_vis['costo'],
+        hole=0.45,
+        textposition='auto',
+        hovertemplate='<b>%{label}</b><br>Total: $%{value:,.0f}<br>%{percent}<extra></extra>',
+        marker=dict(line=dict(color='white', width=3))
+    )])
     
-    with col_sunburst:
-        st.markdown("#### Vista Sunburst - Jerarquía")
-        
-        fig_sunburst = px.sunburst(
-            df_subcat_vis,
-            path=['categoria', 'subcategoria'],
-            values='costo',
-            color='costo',
-            color_continuous_scale='Viridis'
-        )
-        
-        fig_sunburst.update_traces(
-            textinfo='label+percent parent',
-            hovertemplate='<b>%{label}</b><br>Total: $%{value:,.0f}<br>%{percentParent}<extra></extra>',
-            marker=dict(line=dict(color='white', width=2))
-        )
-        
-        fig_sunburst.update_layout(
-            title=dict(text='Categorías → Subcategorías', x=0.5, xanchor='center'),
-            height=550
-        )
-        
-        st.plotly_chart(fig_sunburst, use_container_width=True)
+    total_mes = df_subcat_vis['costo'].sum()
+    fig_donut.update_layout(
+        title=dict(text=f"{meses_nombres[mes_tab2-1]} {ano_actual}", x=0.5, xanchor='center'),
+        annotations=[dict(
+            text=f'<b>Total</b><br>${total_mes:,.0f}',
+            x=0.5, y=0.5,
+            font_size=14,
+            showarrow=False
+        )],
+        showlegend=True,
+        legend=dict(orientation="v", yanchor="middle", y=0.5, xanchor="left", x=1.02, font=dict(size=9)),
+        height=550
+    )
+    
+    st.plotly_chart(fig_donut, use_container_width=True)
+    
+    st.divider()
+
+    st.markdown("#### Vista Sunburst - Jerarquía")
+    
+    fig_sunburst = px.sunburst(
+        df_subcat_vis,
+        path=['categoria', 'subcategoria'],
+        values='costo',
+        color='costo',
+        color_continuous_scale='Viridis'
+    )
+    
+    fig_sunburst.update_traces(
+        textinfo='label+percent parent',
+        hovertemplate='<b>%{label}</b><br>Total: $%{value:,.0f}<br>Porcentaje: %{percentParent:.1%}<extra></extra>',
+        marker=dict(line=dict(color='white', width=2))
+    )
+    
+    fig_sunburst.update_layout(
+        title=dict(text='Categorías → Subcategorías', x=0.5, xanchor='center'),
+        height=550
+    )
+    
+    st.plotly_chart(fig_sunburst, use_container_width=True)
     
 else:
     st.info("ℹ️ Sin datos de subcategorías")
@@ -725,19 +721,27 @@ if not df_evo_cat.empty:
         index='mes', columns='categoria', values='total_mes',
         aggfunc='sum', fill_value=0
     )
+    df_cat_pivot_promedio = df_evo_cat.pivot_table(
+        index='mes', columns='categoria', values='promedio_mes',
+        aggfunc='mean', fill_value=0
+    )
     
     for mes in range(1, 13):
         if mes not in df_cat_pivot_cant.index:
             df_cat_pivot_cant.loc[mes] = 0
         if mes not in df_cat_pivot_total.index:
             df_cat_pivot_total.loc[mes] = 0
+        if mes not in df_cat_pivot_promedio.index:
+            df_cat_pivot_promedio.loc[mes] = 0
     
     df_cat_pivot_cant = df_cat_pivot_cant.sort_index()
     df_cat_pivot_total = df_cat_pivot_total.sort_index()
+    df_cat_pivot_promedio = df_cat_pivot_promedio.sort_index()
     
     fig_cat = go.Figure()
     
     for col in df_cat_pivot_cant.columns:
+        customdata = list(zip(df_cat_pivot_total[col], df_cat_pivot_promedio[col]))
         fig_cat.add_trace(go.Scatter(
             x=[meses_nombres[m-1] for m in df_cat_pivot_cant.index],
             y=df_cat_pivot_cant[col],
@@ -745,8 +749,8 @@ if not df_evo_cat.empty:
             mode='lines+markers',
             line=dict(width=3),
             marker=dict(size=8),
-            customdata=df_cat_pivot_total[col],
-            hovertemplate='<b>%{x}</b><br><b>' + col + '</b><br>Cantidad: %{y:,.0f} | Total: $%{customdata:,.0f}<extra></extra>'
+            customdata=customdata,
+            hovertemplate='<b>%{x}</b><br><b>' + col + '</b><br>Cantidad: %{y:,.0f} | Total: $%{customdata[0]:,.0f} | Promedio: $%{customdata[1]:,.0f}<extra></extra>'
         ))
     
     fig_cat.update_layout(
@@ -816,19 +820,27 @@ if not df_evo_subcat.empty:
         index='mes', columns='label', values='total_mes',
         aggfunc='sum', fill_value=0
     )
+    df_subcat_pivot_promedio = df_evo_subcat_filtrado.pivot_table(
+        index='mes', columns='label', values='promedio_mes',
+        aggfunc='mean', fill_value=0
+    )
     
     for mes in range(1, 13):
         if mes not in df_subcat_pivot_cant.index:
             df_subcat_pivot_cant.loc[mes] = 0
         if mes not in df_subcat_pivot_total.index:
             df_subcat_pivot_total.loc[mes] = 0
+        if mes not in df_subcat_pivot_promedio.index:
+            df_subcat_pivot_promedio.loc[mes] = 0
     
     df_subcat_pivot_cant = df_subcat_pivot_cant.sort_index()
     df_subcat_pivot_total = df_subcat_pivot_total.sort_index()
+    df_subcat_pivot_promedio = df_subcat_pivot_promedio.sort_index()
     
     fig_subcat = go.Figure()
     
     for col in df_subcat_pivot_cant.columns:
+        customdata = list(zip(df_subcat_pivot_total[col], df_subcat_pivot_promedio[col]))
         fig_subcat.add_trace(go.Scatter(
             x=[meses_nombres[m-1] for m in df_subcat_pivot_cant.index],
             y=df_subcat_pivot_cant[col],
@@ -836,8 +848,8 @@ if not df_evo_subcat.empty:
             mode='lines+markers',
             line=dict(width=3),
             marker=dict(size=8),
-            customdata=df_subcat_pivot_total[col],
-            hovertemplate='<b>%{x}</b><br><b>' + col + '</b><br>Cantidad: %{y:,.0f} | Total: $%{customdata:,.0f}<extra></extra>'
+            customdata=customdata,
+            hovertemplate='<b>%{x}</b><br><b>' + col + '</b><br>Cantidad: %{y:,.0f} | Total: $%{customdata[0]:,.0f} | Promedio: $%{customdata[1]:,.0f}<extra></extra>'
         ))
     
     fig_subcat.update_layout(
@@ -875,6 +887,148 @@ if not df_evo_subcat.empty:
     )
 else:
     st.info("ℹ️ Sin datos de subcategorías para este año")
+
+st.divider()
+
+st.subheader("🔄 Comparativa Detallada por Subcategoría")
+
+col_ano1, col_ano2 = st.columns(2)
+with col_ano1:
+    ano_evo1 = st.selectbox("📅 Año 1", anos_disponibles, index=0, key="ano_evo1_sel")
+with col_ano2:
+    ano_evo2 = st.selectbox("📅 Año 2", anos_disponibles, index=min(1, len(anos_disponibles)-1), key="ano_evo2_sel")
+
+df_evo1 = get_evolucion_subcategorias_ano(ano_evo1)
+df_evo2 = get_evolucion_subcategorias_ano(ano_evo2)
+
+labels1 = df_evo1['label'].unique().tolist() if not df_evo1.empty else []
+labels2 = df_evo2['label'].unique().tolist() if not df_evo2.empty else []
+todas_las_etiquetas = sorted(list(set(labels1 + labels2)))
+
+if todas_las_etiquetas:
+    subcat_elegida = st.selectbox("🎯 Selecciona Categoría y Subcategoría", todas_las_etiquetas, key="subcat_comp_sel")
+    
+    df_mensual = pd.DataFrame({'mes': range(1, 13)})
+    
+    # Preparar df1
+    if not df_evo1.empty:
+        df_sub1 = df_evo1[df_evo1['label'] == subcat_elegida]
+        tabla1 = df_mensual.merge(df_sub1, on='mes', how='left').fillna(0)
+    else:
+        tabla1 = df_mensual.copy()
+        for col in ['cantidad', 'total_mes', 'promedio_mes']: tabla1[col] = 0
+        
+    tabla1['mes_nombre'] = [meses_nombres[i-1] for i in tabla1['mes']]
+    tabla1['cantidad_fmt'] = tabla1['cantidad'].apply(lambda x: f"{int(x):,}")
+    tabla1['total_fmt'] = tabla1['total_mes'].apply(lambda x: f"${int(x):,}")
+    tabla1['promedio_fmt'] = tabla1['promedio_mes'].apply(lambda x: f"${int(x):,}")
+
+    # Preparar df2
+    if not df_evo2.empty:
+        df_sub2 = df_evo2[df_evo2['label'] == subcat_elegida]
+        tabla2 = df_mensual.merge(df_sub2, on='mes', how='left').fillna(0)
+    else:
+        tabla2 = df_mensual.copy()
+        for col in ['cantidad', 'total_mes', 'promedio_mes']: tabla2[col] = 0
+
+    tabla2['mes_nombre'] = [meses_nombres[i-1] for i in tabla2['mes']]
+    tabla2['cantidad_fmt'] = tabla2['cantidad'].apply(lambda x: f"{int(x):,}")
+    tabla2['total_fmt'] = tabla2['total_mes'].apply(lambda x: f"${int(x):,}")
+    tabla2['promedio_fmt'] = tabla2['promedio_mes'].apply(lambda x: f"${int(x):,}")
+
+    st.markdown("#### Tablas Comparativas Mensuales")
+    col_tab1, col_tab2 = st.columns(2)
+    
+    with col_tab1:
+        st.caption(f"Año {ano_evo1}")
+        st.dataframe(
+            tabla1[['mes_nombre', 'cantidad_fmt', 'total_fmt', 'promedio_fmt']],
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "mes_nombre": st.column_config.TextColumn("Mes", width=60),
+                "cantidad_fmt": st.column_config.TextColumn("Cantidad", width=80),
+                "total_fmt": st.column_config.TextColumn("Total", width=100),
+                "promedio_fmt": st.column_config.TextColumn("Promedio", width=100),
+            }
+        )
+        
+    with col_tab2:
+        st.caption(f"Año {ano_evo2}")
+        st.dataframe(
+            tabla2[['mes_nombre', 'cantidad_fmt', 'total_fmt', 'promedio_fmt']],
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "mes_nombre": st.column_config.TextColumn("Mes", width=60),
+                "cantidad_fmt": st.column_config.TextColumn("Cantidad", width=80),
+                "total_fmt": st.column_config.TextColumn("Total", width=100),
+                "promedio_fmt": st.column_config.TextColumn("Promedio", width=100),
+            }
+        )
+
+    st.markdown("#### Gráfico Comparativo")
+    fig_comp_subcat = go.Figure()
+    
+    fig_comp_subcat.add_trace(go.Bar(
+        x=tabla1['mes_nombre'],
+        y=tabla1['total_mes'],
+        customdata=tabla1['promedio_mes'],
+        name=f'Total Año {ano_evo1}',
+        yaxis='y1',
+        marker=dict(color='rgba(0, 118, 168, 0.7)'),
+        hovertemplate='<b>%{x}</b><br>Total: $%{y:,.0f}<br>Promedio: $%{customdata:,.0f}<extra></extra>'
+    ))
+    
+    if ano_evo1 != ano_evo2:
+        fig_comp_subcat.add_trace(go.Bar(
+            x=tabla2['mes_nombre'],
+            y=tabla2['total_mes'],
+            customdata=tabla2['promedio_mes'],
+            name=f'Total Año {ano_evo2}',
+            yaxis='y1',
+            marker=dict(color='rgba(76, 175, 80, 0.7)'),
+            hovertemplate='<b>%{x}</b><br>Total: $%{y:,.0f}<br>Promedio: $%{customdata:,.0f}<extra></extra>'
+        ))
+        
+    fig_comp_subcat.add_trace(go.Scatter(
+        x=tabla1['mes_nombre'],
+        y=tabla1['cantidad'],
+        name=f'Cantidad Año {ano_evo1}',
+        yaxis='y2',
+        mode='lines+markers',
+        line=dict(color='#FF6B6B', width=2),
+        marker=dict(size=8),
+        hovertemplate='<b>%{x}</b><br>Cant: %{y:,.0f}<extra></extra>'
+    ))
+    
+    if ano_evo1 != ano_evo2:
+        fig_comp_subcat.add_trace(go.Scatter(
+            x=tabla2['mes_nombre'],
+            y=tabla2['cantidad'],
+            name=f'Cantidad Año {ano_evo2}',
+            yaxis='y2',
+            mode='lines+markers',
+            line=dict(color='#FFC107', width=2),
+            marker=dict(size=8),
+            hovertemplate='<b>%{x}</b><br>Cant: %{y:,.0f}<extra></extra>'
+        ))
+        
+    fig_comp_subcat.update_layout(
+        xaxis_title="Mes",
+        yaxis=dict(title="Total Ingresos ($)", side='left'),
+        yaxis2=dict(title="Cantidad de Trabajos", overlaying='y', side='right'),
+        hovermode='x unified',
+        height=450,
+        barmode='group',
+        showlegend=True,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+    )
+    
+    st.plotly_chart(fig_comp_subcat, use_container_width=True)
+
+else:
+    st.info("No hay datos suficientes para comparar subcategorías.")
 
 st.divider()
 
@@ -999,6 +1153,8 @@ if not df_notas.empty:
     
 else:
     st.info(f"ℹ️ Sin notas de crédito para el año {ano_actual}")
+
+st.divider()
 
 # ============================================================
 # PIE DE PÁGINA
