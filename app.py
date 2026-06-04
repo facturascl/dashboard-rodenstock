@@ -76,6 +76,7 @@ Salta a cualquier sección:
 - [📊 Comparativa](#comparacion-anual)
 - [🏷️ Desglose](#desglose-subcategorias)
 - [📈 Evolución](#evolucion-mensual)
+- [🔍 Monitor Hi-index](#monitor-hi-index)
 - [📋 Notas de Crédito](#notas-de-credito)
 """)
 
@@ -345,6 +346,55 @@ def get_notas_credito_categorias_mes(ano, mes):
     FROM resumen_categorias rc
     CROSS JOIN totales_mes tm
     ORDER BY rc.total_dinero DESC
+    """
+    return pd.read_sql_query(query, conn)
+
+@st.cache_data(ttl=300)
+def get_evolucion_hi_index(ano):
+    """Obtiene la progresión semanal de Monofocales Hi-index Azul y Verde con la misma lógica del resto del dashboard."""
+    query = f"""
+    WITH facturas_clasif AS (
+      SELECT
+        f.numerofactura,
+        f.fechaemision,
+        CAST(STRFTIME('%Y', f.fechaemision) AS INTEGER) AS ano,
+        CASE 
+          WHEN lf.clasificacion_categoria IS NULL 
+               OR lf.clasificacion_categoria = 'Sin clasificacion' 
+               OR TRIM(lf.clasificacion_categoria) = ''
+            THEN 'Otros'
+          ELSE lf.clasificacion_categoria
+        END AS categoria,
+        COALESCE(lf.clasificacion_subcategoria, '') AS subcategoria,
+        COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0) AS total_factura
+      FROM lineas_factura lf
+      INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
+      WHERE f.fechaemision IS NOT NULL
+    ),
+    facturas_unicas AS (
+      SELECT
+        numerofactura,
+        fechaemision,
+        ano,
+        categoria,
+        MIN(subcategoria) AS subcategoria,
+        MAX(total_factura) AS total_factura
+      FROM facturas_clasif
+      GROUP BY numerofactura, fechaemision, ano, categoria
+    )
+    SELECT
+      date(fechaemision, '-6 days', 'weekday 1') as semana_fecha,
+      CAST(STRFTIME('%W', fechaemision) AS INTEGER) as n_semana,
+      subcategoria,
+      COUNT(*) as cantidad,
+      CAST(SUM(total_factura) AS INTEGER) as total,
+      CAST(AVG(total_factura) AS INTEGER) as promedio
+    FROM facturas_unicas
+    WHERE ano = {int(ano)}
+      AND categoria = 'Monofocales'
+      AND subcategoria IN ('Hi-index Azul', 'Hi-index Verde')
+    GROUP BY semana_fecha, n_semana, subcategoria
+    ORDER BY semana_fecha, subcategoria
     """
     return pd.read_sql_query(query, conn)
 
@@ -1029,6 +1079,154 @@ if todas_las_etiquetas:
 
 else:
     st.info("No hay datos suficientes para comparar subcategorías.")
+
+st.divider()
+
+# ============================================================
+# SECCIÓN 3.5: MONITOR HI-INDEX
+# ============================================================
+st.header("🔍 Monitor Hi-index", anchor="monitor-hi-index")
+
+df_hi = get_evolucion_hi_index(ano_actual)
+
+if not df_hi.empty:
+    # 1. Filtros locales
+    col_fil1, col_fil2 = st.columns([4, 8])
+    
+    # Obtener todas las semanas únicas de forma ordenada
+    semanas_unicas = sorted(df_hi['semana_fecha'].unique().tolist())
+    
+    with col_fil1:
+        subcats_seleccionadas = st.multiselect(
+            "🎯 Selecciona Subcategoría(s)",
+            options=["Hi-index Azul", "Hi-index Verde"],
+            default=["Hi-index Azul", "Hi-index Verde"],
+            key="hi_index_subcats"
+        )
+        
+    with col_fil2:
+        num_semanas = st.slider(
+            "📅 Cantidad de semanas a mostrar (más recientes)",
+            min_value=min(4, len(semanas_unicas)),
+            max_value=len(semanas_unicas),
+            value=min(12, len(semanas_unicas)),
+            step=1,
+            key="hi_index_semanas"
+        )
+
+    # Filtrar datos según la selección de subcategorías y semanas
+    if subcats_seleccionadas:
+        # Filtrar subcategorías
+        df_hi_filtrado = df_hi[df_hi['subcategoria'].isin(subcats_seleccionadas)]
+        
+        # Obtener las últimas N semanas del dataset filtrado
+        semanas_mostrar = semanas_unicas[-num_semanas:]
+        df_hi_filtrado = df_hi_filtrado[df_hi_filtrado['semana_fecha'].isin(semanas_mostrar)]
+        
+        if not df_hi_filtrado.empty:
+            # 2. Tarjetas de métricas
+            tot_cantidad = df_hi_filtrado['cantidad'].sum()
+            tot_total = df_hi_filtrado['total'].sum()
+            prom_gral = int(tot_total / tot_cantidad) if tot_cantidad > 0 else 0
+            
+            st.markdown("### Resumen del Período Seleccionado")
+            col_m1, col_m2, col_m3 = st.columns(3)
+            with col_m1:
+                st.metric("Total Lentes/Trabajos", f"{tot_cantidad:,}")
+            with col_m2:
+                st.metric("Total Ventas ($ con IVA)", f"${tot_total:,.0f}")
+            with col_m3:
+                st.metric("Precio Promedio ($ con IVA)", f"${prom_gral:,}")
+            
+            st.divider()
+            
+            # 3. Evolución en un solo gráfico (Plotly)
+            st.markdown("### Evolución de Ventas Semanales")
+            
+            # Crear pivot table para los gráficos de líneas
+            df_pivot_total = df_hi_filtrado.pivot(index='semana_fecha', columns='subcategoria', values='total').fillna(0)
+            df_pivot_total = df_pivot_total.sort_index()
+            
+            df_pivot_cant = df_hi_filtrado.pivot(index='semana_fecha', columns='subcategoria', values='cantidad').fillna(0)
+            df_pivot_prom = df_hi_filtrado.pivot(index='semana_fecha', columns='subcategoria', values='promedio').fillna(0)
+            df_pivot_nsemana = df_hi_filtrado.pivot(index='semana_fecha', columns='subcategoria', values='n_semana').fillna(0)
+            
+            colors = {"Hi-index Azul": "#0076A8", "Hi-index Verde": "#4CAF50"}
+            
+            fig = go.Figure()
+            
+            for subcat in df_pivot_total.columns:
+                customdata = list(zip(
+                    df_pivot_cant[subcat],
+                    df_pivot_prom[subcat],
+                    df_pivot_nsemana[subcat]
+                ))
+                
+                # Eje X con etiquetas formateadas: "Semana XX (YYYY-MM-DD)"
+                x_labels = [
+                    f"Semana {int(df_pivot_nsemana.loc[fecha, subcat]):02d} ({fecha})"
+                    for fecha in df_pivot_total.index
+                ]
+                
+                fig.add_trace(go.Scatter(
+                    x=x_labels,
+                    y=df_pivot_total[subcat],
+                    name=subcat,
+                    mode='lines+markers',
+                    line=dict(color=colors.get(subcat, '#333333'), width=3),
+                    marker=dict(size=8),
+                    customdata=customdata,
+                    hovertemplate=(
+                        '<b>Semana %{customdata[2]:02d}</b> (%{x})<br>'
+                        '<b>Subcategoría:</b> ' + subcat + '<br>'
+                        '<b>Ventas Totales:</b> $%{y:,.0f}<br>'
+                        '<b>Cantidad:</b> %{customdata[0]:,.0f}<br>'
+                        '<b>Precio Promedio:</b> $%{customdata[1]:,.0f}<extra></extra>'
+                    )
+                ))
+                
+            fig.update_layout(
+                xaxis_title="Semana (Lunes de inicio)",
+                yaxis=dict(title="Ventas Totales ($ con IVA)"),
+                hovermode='x unified',
+                height=500,
+                showlegend=True,
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            
+            st.divider()
+            
+            # 4. Tabla Detallada
+            st.markdown("### Tabla Detallada por Semana")
+            df_tabla_hi = df_hi_filtrado.copy().sort_values(by=['semana_fecha', 'subcategoria'], ascending=[False, True])
+            
+            # Formateamos la semana para la tabla
+            df_tabla_hi['semana_fmt'] = df_tabla_hi.apply(
+                lambda row: f"Semana {row['n_semana']:02d} ({row['semana_fecha']})", axis=1
+            )
+            df_tabla_hi['cantidad_fmt'] = df_tabla_hi['cantidad'].apply(lambda x: f"{int(x):,}")
+            df_tabla_hi['total_fmt'] = df_tabla_hi['total'].apply(lambda x: f"${int(x):,}")
+            df_tabla_hi['promedio_fmt'] = df_tabla_hi['promedio'].apply(lambda x: f"${int(x):,}")
+            
+            st.dataframe(
+                df_tabla_hi[['semana_fmt', 'subcategoria', 'cantidad_fmt', 'total_fmt', 'promedio_fmt']],
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "semana_fmt": st.column_config.TextColumn("Semana (Inicio Lunes)", width=200),
+                    "subcategoria": st.column_config.TextColumn("Subcategoría", width=150),
+                    "cantidad_fmt": st.column_config.TextColumn("Cantidad", width=100),
+                    "total_fmt": st.column_config.TextColumn("Total ($)", width=130),
+                    "promedio_fmt": st.column_config.TextColumn("Promedio ($)", width=130)
+                }
+            )
+        else:
+            st.warning("⚠️ No hay datos para las semanas seleccionadas.")
+    else:
+        st.info("💡 Por favor, selecciona al menos una subcategoría en los filtros superiores para ver los datos.")
+else:
+    st.info(f"ℹ️ Sin datos de Monofocales Hi-index para el año {ano_actual}.")
 
 st.divider()
 
