@@ -1129,10 +1129,10 @@ if not df_hi.empty:
             tot_total = df_hi_filtrado['total'].sum()
             prom_gral = int(tot_total / tot_cantidad) if tot_cantidad > 0 else 0
             
-            st.markdown("### Resumen del Período Seleccionado")
+            st.markdown("### Evolución Hi-index semanal")
             col_m1, col_m2, col_m3 = st.columns(3)
             with col_m1:
-                st.metric("Total Lentes/Trabajos", f"{tot_cantidad:,}")
+                st.metric("Total Trabajos", f"{tot_cantidad:,}")
             with col_m2:
                 st.metric("Total Ventas ($ con IVA)", f"${tot_total:,.0f}")
             with col_m3:
@@ -1141,7 +1141,7 @@ if not df_hi.empty:
             st.divider()
             
             # 3. Evolución en un solo gráfico (Plotly)
-            st.markdown("### Evolución de Ventas Semanales")
+            st.markdown("### Evolución Hi-index semanal")
             
             # Crear pivot table para los gráficos de líneas
             df_pivot_total = df_hi_filtrado.pivot(index='semana_fecha', columns='subcategoria', values='total').fillna(0)
@@ -1157,7 +1157,7 @@ if not df_hi.empty:
             
             for subcat in df_pivot_total.columns:
                 customdata = list(zip(
-                    df_pivot_cant[subcat],
+                    df_pivot_total[subcat],
                     df_pivot_prom[subcat],
                     df_pivot_nsemana[subcat]
                 ))
@@ -1170,7 +1170,7 @@ if not df_hi.empty:
                 
                 fig.add_trace(go.Scatter(
                     x=x_labels,
-                    y=df_pivot_total[subcat],
+                    y=df_pivot_cant[subcat],
                     name=subcat,
                     mode='lines+markers',
                     line=dict(color=colors.get(subcat, '#333333'), width=3),
@@ -1179,15 +1179,15 @@ if not df_hi.empty:
                     hovertemplate=(
                         '<b>Semana %{customdata[2]:02d}</b> (%{x})<br>'
                         '<b>Subcategoría:</b> ' + subcat + '<br>'
-                        '<b>Ventas Totales:</b> $%{y:,.0f}<br>'
-                        '<b>Cantidad:</b> %{customdata[0]:,.0f}<br>'
+                        '<b>Cantidad:</b> %{y:,.0f}<br>'
+                        '<b>Ventas Totales:</b> $%{customdata[0]:,.0f}<br>'
                         '<b>Precio Promedio:</b> $%{customdata[1]:,.0f}<extra></extra>'
                     )
                 ))
                 
             fig.update_layout(
                 xaxis_title="Semana (Lunes de inicio)",
-                yaxis=dict(title="Ventas Totales ($ con IVA)"),
+                yaxis=dict(title="Cantidad"),
                 hovermode='x unified',
                 height=500,
                 showlegend=True,
