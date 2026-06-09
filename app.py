@@ -384,7 +384,7 @@ def get_evolucion_hi_index(ano):
     )
     SELECT
       date(fechaemision, '-6 days', 'weekday 1') as semana_fecha,
-      CAST(STRFTIME('%W', fechaemision) AS INTEGER) as n_semana,
+      CAST(STRFTIME('%W', fechaemision) AS INTEGER) + 1 as n_semana,
       subcategoria,
       COUNT(*) as cantidad,
       CAST(SUM(total_factura) AS INTEGER) as total,
@@ -1089,6 +1089,32 @@ st.header("🔍 Monitor Hi-index", anchor="monitor-hi-index")
 
 df_hi = get_evolucion_hi_index(ano_actual)
 
+# Si el año seleccionado es el año actual, asegurarse de que la semana
+# en curso aparezca en el gráfico aunque todavía no tenga facturas.
+if int(ano_actual) == datetime.now().year:
+    hoy = datetime.now().date()
+    # Lunes de la semana actual
+    from datetime import timedelta
+    lunes_actual = hoy - timedelta(days=hoy.weekday())
+    semana_actual_fecha = str(lunes_actual)
+    # Número de semana = %W + 1 (igual que en la query SQL)
+    n_semana_actual = int(lunes_actual.strftime('%W')) + 1
+
+    semanas_en_df = set(df_hi['semana_fecha'].tolist())
+    if semana_actual_fecha not in semanas_en_df and not df_hi.empty:
+        filas_nuevas = []
+        for subcat in ['Hi-index Azul', 'Hi-index Verde']:
+            filas_nuevas.append({
+                'semana_fecha': semana_actual_fecha,
+                'n_semana': n_semana_actual,
+                'subcategoria': subcat,
+                'cantidad': 0,
+                'total': 0,
+                'promedio': 0
+            })
+        df_hi = pd.concat([df_hi, pd.DataFrame(filas_nuevas)], ignore_index=True)
+        df_hi = df_hi.sort_values('semana_fecha').reset_index(drop=True)
+
 if not df_hi.empty:
     # 1. Filtros locales
     col_fil1, col_fil2 = st.columns([4, 8])
@@ -1155,22 +1181,39 @@ if not df_hi.empty:
             
             fig = go.Figure()
             
+            # Construir un único eje X unificado con TODAS las fechas de ambas series
+            # Esto evita desalineación cuando una subcategoría no tiene datos en alguna semana
+            todas_fechas = sorted(df_pivot_total.index.tolist())
+            
+            # Mapa unificado de fecha -> n_semana (tomando el primer valor disponible entre subcategorías)
+            fecha_a_nsemana = {}
+            for fecha in todas_fechas:
+                for subcat_col in df_pivot_nsemana.columns:
+                    val = df_pivot_nsemana.loc[fecha, subcat_col] if fecha in df_pivot_nsemana.index else 0
+                    if val > 0:
+                        fecha_a_nsemana[fecha] = int(val)
+                        break
+                if fecha not in fecha_a_nsemana:
+                    fecha_a_nsemana[fecha] = 0
+            
+            # Eje X compartido con etiquetas formateadas: "Semana XX (YYYY-MM-DD)"
+            x_labels_unificados = [
+                f"Semana {fecha_a_nsemana[fecha]:02d} ({fecha})"
+                for fecha in todas_fechas
+            ]
+            
             for subcat in df_pivot_total.columns:
-                customdata = list(zip(
-                    df_pivot_total[subcat],
-                    df_pivot_prom[subcat],
-                    df_pivot_nsemana[subcat]
-                ))
+                # Alinear datos al eje X unificado (rellenar con 0 si no hay datos)
+                y_cant = [df_pivot_cant[subcat].get(fecha, 0) for fecha in todas_fechas]
+                y_total = [df_pivot_total[subcat].get(fecha, 0) for fecha in todas_fechas]
+                y_prom = [df_pivot_prom[subcat].get(fecha, 0) for fecha in todas_fechas]
+                y_nsemana = [fecha_a_nsemana[fecha] for fecha in todas_fechas]
                 
-                # Eje X con etiquetas formateadas: "Semana XX (YYYY-MM-DD)"
-                x_labels = [
-                    f"Semana {int(df_pivot_nsemana.loc[fecha, subcat]):02d} ({fecha})"
-                    for fecha in df_pivot_total.index
-                ]
+                customdata = list(zip(y_total, y_prom, y_nsemana))
                 
                 fig.add_trace(go.Scatter(
-                    x=x_labels,
-                    y=df_pivot_cant[subcat],
+                    x=x_labels_unificados,
+                    y=y_cant,
                     name=subcat,
                     mode='lines+markers',
                     line=dict(color=colors.get(subcat, '#333333'), width=3),
