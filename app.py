@@ -10,6 +10,7 @@ import plotly.express as px
 import sqlite3
 from datetime import datetime
 import os
+import io
 
 st.set_page_config(page_title="Dashboard Rodenstock", page_icon="📊", layout="wide")
 
@@ -78,7 +79,9 @@ Salta a cualquier sección:
 - [📈 Evolución](#evolucion-mensual)
 - [🔍 Monitor Hi-index](#monitor-hi-index)
 - [📋 Notas de Crédito](#notas-de-credito)
+- [📥 Exportar Datos](#exportacion-datos)
 """)
+
 
 st.sidebar.divider()
 st.sidebar.subheader("⚙️ Mantenimiento")
@@ -384,7 +387,7 @@ def get_evolucion_hi_index(ano):
     )
     SELECT
       date(fechaemision, '-6 days', 'weekday 1') as semana_fecha,
-      CAST(STRFTIME('%W', fechaemision) AS INTEGER) + 1 as n_semana,
+      CAST(STRFTIME('%W', fechaemision) AS INTEGER) as n_semana,
       subcategoria,
       COUNT(*) as cantidad,
       CAST(SUM(total_factura) AS INTEGER) as total,
@@ -397,6 +400,74 @@ def get_evolucion_hi_index(ano):
     ORDER BY semana_fecha, subcategoria
     """
     return pd.read_sql_query(query, conn)
+
+
+@st.cache_data(ttl=300)
+def get_export_data_facturas():
+    """Obtiene todos los datos de facturas y sus líneas combinados."""
+    query = """
+    SELECT 
+        f.numerofactura AS [Número Factura],
+        f.fechaemision AS [Fecha Emisión],
+        CAST(f.subtotal AS INTEGER) AS [Factura Subtotal],
+        CAST(f.descuento_pesos AS INTEGER) AS [Factura Descuento ($)],
+        CAST(f.valorneto AS INTEGER) AS [Factura Valor Neto],
+        CAST(f.iva AS INTEGER) AS [Factura IVA],
+        CAST(f.total AS INTEGER) AS [Factura Total],
+        lf.linea_numero AS [Línea Nº],
+        lf.descripcion AS [Descripción],
+        CAST(lf.cantidad AS INTEGER) AS [Cantidad],
+        CAST(lf.precio_unitario AS INTEGER) AS [Precio Unitario],
+        lf.descuento_pesos_porcentaje AS [Línea Descuento (%)],
+        CAST(lf.total_linea AS INTEGER) AS [Total Línea],
+        CASE 
+          WHEN lf.clasificacion_categoria IS NULL 
+               OR lf.clasificacion_categoria = 'Sin clasificacion' 
+               OR TRIM(lf.clasificacion_categoria) = ''
+            THEN 'Otros'
+          ELSE lf.clasificacion_categoria
+        END AS [Categoría],
+        COALESCE(lf.clasificacion_subcategoria, '') AS [Subcategoría]
+    FROM lineas_factura lf
+    INNER JOIN facturas f ON lf.numerofactura = f.numerofactura
+    ORDER BY f.fechaemision DESC, f.numerofactura DESC, lf.linea_numero ASC
+    """
+    return pd.read_sql_query(query, conn)
+
+
+@st.cache_data(ttl=300)
+def get_export_data_notas():
+    """Obtiene todos los datos de notas de crédito y sus líneas combinados."""
+    query = """
+    SELECT 
+        nc.numeronota AS [Número Nota],
+        nc.fechaemision AS [Fecha Emisión],
+        CAST(nc.subtotal AS INTEGER) AS [Nota Subtotal],
+        CAST(nc.descuento_pesos AS INTEGER) AS [Nota Descuento ($)],
+        CAST(nc.valorneto AS INTEGER) AS [Nota Valor Neto],
+        CAST(nc.iva AS INTEGER) AS [Nota IVA],
+        CAST(nc.total AS INTEGER) AS [Nota Total],
+        ln.linea_numero AS [Línea Nº],
+        ln.descripcion AS [Descripción],
+        CAST(ln.cantidad AS INTEGER) AS [Cantidad],
+        CAST(ln.precio_unitario AS INTEGER) AS [Precio Unitario],
+        ln.descuento_pesos_porcentaje AS [Línea Descuento (%)],
+        CAST(ln.total_linea AS INTEGER) AS [Total Línea],
+        CASE 
+          WHEN ln.clasificacion_categoria IS NULL 
+               OR ln.clasificacion_categoria = 'Sin clasificacion' 
+               OR TRIM(ln.clasificacion_categoria) = ''
+            THEN 'Otros'
+          ELSE ln.clasificacion_categoria
+        END AS [Categoría],
+        COALESCE(ln.clasificacion_subcategoria, '') AS [Subcategoría]
+    FROM lineas_notas ln
+    INNER JOIN notascredito nc ON ln.numeronota = nc.numeronota
+    ORDER BY nc.fechaemision DESC, nc.numeronota DESC, ln.linea_numero ASC
+    """
+    return pd.read_sql_query(query, conn)
+
+
 
 # ============================================================
 # CONSTANTES
@@ -1089,32 +1160,6 @@ st.header("🔍 Monitor Hi-index", anchor="monitor-hi-index")
 
 df_hi = get_evolucion_hi_index(ano_actual)
 
-# Si el año seleccionado es el año actual, asegurarse de que la semana
-# en curso aparezca en el gráfico aunque todavía no tenga facturas.
-if int(ano_actual) == datetime.now().year:
-    hoy = datetime.now().date()
-    # Lunes de la semana actual
-    from datetime import timedelta
-    lunes_actual = hoy - timedelta(days=hoy.weekday())
-    semana_actual_fecha = str(lunes_actual)
-    # Número de semana = %W + 1 (igual que en la query SQL)
-    n_semana_actual = int(lunes_actual.strftime('%W')) + 1
-
-    semanas_en_df = set(df_hi['semana_fecha'].tolist())
-    if semana_actual_fecha not in semanas_en_df and not df_hi.empty:
-        filas_nuevas = []
-        for subcat in ['Hi-index Azul', 'Hi-index Verde']:
-            filas_nuevas.append({
-                'semana_fecha': semana_actual_fecha,
-                'n_semana': n_semana_actual,
-                'subcategoria': subcat,
-                'cantidad': 0,
-                'total': 0,
-                'promedio': 0
-            })
-        df_hi = pd.concat([df_hi, pd.DataFrame(filas_nuevas)], ignore_index=True)
-        df_hi = df_hi.sort_values('semana_fecha').reset_index(drop=True)
-
 if not df_hi.empty:
     # 1. Filtros locales
     col_fil1, col_fil2 = st.columns([4, 8])
@@ -1155,10 +1200,10 @@ if not df_hi.empty:
             tot_total = df_hi_filtrado['total'].sum()
             prom_gral = int(tot_total / tot_cantidad) if tot_cantidad > 0 else 0
             
-            st.markdown("### Evolución Hi-index semanal")
+            st.markdown("### Resumen del Período Seleccionado")
             col_m1, col_m2, col_m3 = st.columns(3)
             with col_m1:
-                st.metric("Total Trabajos", f"{tot_cantidad:,}")
+                st.metric("Total Lentes/Trabajos", f"{tot_cantidad:,}")
             with col_m2:
                 st.metric("Total Ventas ($ con IVA)", f"${tot_total:,.0f}")
             with col_m3:
@@ -1167,7 +1212,7 @@ if not df_hi.empty:
             st.divider()
             
             # 3. Evolución en un solo gráfico (Plotly)
-            st.markdown("### Evolución Hi-index semanal")
+            st.markdown("### Evolución de Ventas Semanales")
             
             # Crear pivot table para los gráficos de líneas
             df_pivot_total = df_hi_filtrado.pivot(index='semana_fecha', columns='subcategoria', values='total').fillna(0)
@@ -1181,39 +1226,22 @@ if not df_hi.empty:
             
             fig = go.Figure()
             
-            # Construir un único eje X unificado con TODAS las fechas de ambas series
-            # Esto evita desalineación cuando una subcategoría no tiene datos en alguna semana
-            todas_fechas = sorted(df_pivot_total.index.tolist())
-            
-            # Mapa unificado de fecha -> n_semana (tomando el primer valor disponible entre subcategorías)
-            fecha_a_nsemana = {}
-            for fecha in todas_fechas:
-                for subcat_col in df_pivot_nsemana.columns:
-                    val = df_pivot_nsemana.loc[fecha, subcat_col] if fecha in df_pivot_nsemana.index else 0
-                    if val > 0:
-                        fecha_a_nsemana[fecha] = int(val)
-                        break
-                if fecha not in fecha_a_nsemana:
-                    fecha_a_nsemana[fecha] = 0
-            
-            # Eje X compartido con etiquetas formateadas: "Semana XX (YYYY-MM-DD)"
-            x_labels_unificados = [
-                f"Semana {fecha_a_nsemana[fecha]:02d} ({fecha})"
-                for fecha in todas_fechas
-            ]
-            
             for subcat in df_pivot_total.columns:
-                # Alinear datos al eje X unificado (rellenar con 0 si no hay datos)
-                y_cant = [df_pivot_cant[subcat].get(fecha, 0) for fecha in todas_fechas]
-                y_total = [df_pivot_total[subcat].get(fecha, 0) for fecha in todas_fechas]
-                y_prom = [df_pivot_prom[subcat].get(fecha, 0) for fecha in todas_fechas]
-                y_nsemana = [fecha_a_nsemana[fecha] for fecha in todas_fechas]
+                customdata = list(zip(
+                    df_pivot_cant[subcat],
+                    df_pivot_prom[subcat],
+                    df_pivot_nsemana[subcat]
+                ))
                 
-                customdata = list(zip(y_total, y_prom, y_nsemana))
+                # Eje X con etiquetas formateadas: "Semana XX (YYYY-MM-DD)"
+                x_labels = [
+                    f"Semana {int(df_pivot_nsemana.loc[fecha, subcat]):02d} ({fecha})"
+                    for fecha in df_pivot_total.index
+                ]
                 
                 fig.add_trace(go.Scatter(
-                    x=x_labels_unificados,
-                    y=y_cant,
+                    x=x_labels,
+                    y=df_pivot_total[subcat],
                     name=subcat,
                     mode='lines+markers',
                     line=dict(color=colors.get(subcat, '#333333'), width=3),
@@ -1222,15 +1250,15 @@ if not df_hi.empty:
                     hovertemplate=(
                         '<b>Semana %{customdata[2]:02d}</b> (%{x})<br>'
                         '<b>Subcategoría:</b> ' + subcat + '<br>'
-                        '<b>Cantidad:</b> %{y:,.0f}<br>'
-                        '<b>Ventas Totales:</b> $%{customdata[0]:,.0f}<br>'
+                        '<b>Ventas Totales:</b> $%{y:,.0f}<br>'
+                        '<b>Cantidad:</b> %{customdata[0]:,.0f}<br>'
                         '<b>Precio Promedio:</b> $%{customdata[1]:,.0f}<extra></extra>'
                     )
                 ))
                 
             fig.update_layout(
                 xaxis_title="Semana (Lunes de inicio)",
-                yaxis=dict(title="Cantidad"),
+                yaxis=dict(title="Ventas Totales ($ con IVA)"),
                 hovermode='x unified',
                 height=500,
                 showlegend=True,
@@ -1394,6 +1422,177 @@ if not df_notas.empty:
     
 else:
     st.info(f"ℹ️ Sin notas de crédito para el año {ano_actual}")
+
+st.divider()
+
+# ============================================================
+# SECCIÓN 5: EXPORTACIÓN DE DATOS
+# ============================================================
+st.header("📥 Exportación de Datos", anchor="exportacion-datos")
+st.markdown("Filtra y exporta el detalle completo de facturas o notas de crédito a un archivo Excel (`.xlsx`).")
+
+# Selección del tipo de datos
+data_type = st.radio(
+    "1. Selecciona el tipo de documento a exportar:",
+    options=["Facturas (Detalle de Líneas)", "Notas de Crédito (Detalle de Líneas)"],
+    horizontal=True,
+    key="export_data_type"
+)
+
+# Cargar datos según selección
+if "Facturas" in data_type:
+    df_raw = get_export_data_facturas().copy()
+else:
+    df_raw = get_export_data_notas().copy()
+
+if not df_raw.empty:
+    # Convertir fechas para filtrado
+    df_raw['_date_obj'] = pd.to_datetime(df_raw['Fecha Emisión']).dt.date
+    min_date = df_raw['_date_obj'].min()
+    max_date = df_raw['_date_obj'].max()
+    
+    # Asegurar fechas válidas
+    if pd.isnull(min_date):
+        min_date = datetime.now().date()
+    if pd.isnull(max_date):
+        max_date = datetime.now().date()
+        
+    st.markdown("### 🔍 2. Filtros de Búsqueda")
+    col_date, col_cat, col_subcat = st.columns(3)
+    
+    with col_date:
+        date_range = st.date_input(
+            "Rango de Fechas",
+            value=(min_date, max_date),
+            min_value=min_date,
+            max_value=max_date,
+            key="export_date_range"
+        )
+        
+    with col_cat:
+        all_categories = sorted(df_raw['Categoría'].dropna().unique().tolist())
+        selected_categories = st.multiselect(
+            "Categorías",
+            options=all_categories,
+            default=[],
+            placeholder="Todas",
+            key="export_categories"
+        )
+        
+    with col_subcat:
+        # Filtrar subcategorías basadas en categorías seleccionadas
+        if selected_categories:
+            subcat_source = df_raw[df_raw['Categoría'].isin(selected_categories)]
+        else:
+            subcat_source = df_raw
+        
+        all_subcategories = sorted(subcat_source['Subcategoría'].dropna().unique().tolist())
+        all_subcategories = [s for s in all_subcategories if s.strip() != ""]
+        
+        selected_subcategories = st.multiselect(
+            "Subcategorías",
+            options=all_subcategories,
+            default=[],
+            placeholder="Todas",
+            key="export_subcategories"
+        )
+        
+    # Búsqueda por palabra clave
+    keyword = st.text_input(
+        "Buscar por palabra clave (Descripción, Número de Documento o Cliente)",
+        placeholder="Escribe término de búsqueda...",
+        key="export_keyword"
+    )
+    
+    # Aplicar filtros
+    df_filtered = df_raw.copy()
+    
+    # Filtro de fecha
+    if isinstance(date_range, tuple) and len(date_range) == 2:
+        start_date, end_date = date_range
+        df_filtered = df_filtered[(df_filtered['_date_obj'] >= start_date) & (df_filtered['_date_obj'] <= end_date)]
+    elif isinstance(date_range, tuple) and len(date_range) == 1:
+        start_date = date_range[0]
+        df_filtered = df_filtered[df_filtered['_date_obj'] >= start_date]
+    elif date_range:
+        # st.date_input a veces puede devolver un solo objeto de tipo date en lugar de una tupla
+        df_filtered = df_filtered[df_filtered['_date_obj'] == date_range]
+        
+    # Filtro de categoría
+    if selected_categories:
+        df_filtered = df_filtered[df_filtered['Categoría'].isin(selected_categories)]
+        
+    # Filtro de subcategoría
+    if selected_subcategories:
+        df_filtered = df_filtered[df_filtered['Subcategoría'].isin(selected_subcategories)]
+        
+    # Filtro de palabra clave
+    if keyword:
+        keyword_lower = keyword.lower()
+        search_mask = (
+            df_filtered['Descripción'].str.lower().str.contains(keyword_lower, na=False) |
+            df_filtered[df_filtered.columns[0]].astype(str).str.lower().str.contains(keyword_lower, na=False)
+        )
+        if 'Nombre Cliente' in df_filtered.columns:
+            search_mask = search_mask | df_filtered['Nombre Cliente'].str.lower().str.contains(keyword_lower, na=False)
+            
+        df_filtered = df_filtered[search_mask]
+        
+    # Eliminar columna temporal de fecha
+    df_filtered = df_filtered.drop(columns=['_date_obj'])
+    
+    # 3. Selección de Columnas
+    st.markdown("### 📋 3. Selección de Columnas")
+    all_columns = df_filtered.columns.tolist()
+    
+    selected_columns = st.multiselect(
+        "Selecciona las columnas que deseas incluir (todas seleccionadas por defecto):",
+        options=all_columns,
+        default=all_columns,
+        key="export_selected_columns"
+    )
+    
+    if not selected_columns:
+        st.warning("⚠️ Debes seleccionar al menos una columna para poder exportar.")
+    else:
+        df_final = df_filtered[selected_columns]
+        
+        # 4. Vista previa y Descarga
+        st.markdown("### 📊 4. Vista Previa y Descarga")
+        
+        col_metric, col_download = st.columns([4, 8])
+        
+        with col_metric:
+            st.metric("Registros Encontrados", f"{len(df_final):,}")
+            
+        with col_download:
+            if not df_final.empty:
+                # Generar archivo Excel en buffer de bytes
+                buffer = io.BytesIO()
+                with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                    df_final.to_excel(writer, index=False, sheet_name='Datos')
+                
+                # Nombre de archivo dinámico
+                file_name_prefix = "facturas" if "Facturas" in data_type else "notas_credito"
+                file_name = f"exportacion_{file_name_prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+                
+                st.download_button(
+                    label="📥 Descargar Excel (.xlsx)",
+                    data=buffer.getvalue(),
+                    file_name=file_name,
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                    key="export_download_btn"
+                )
+            else:
+                st.info("No hay datos que coincidan con los filtros seleccionados.")
+                
+        # Mostrar vista previa si hay datos
+        if not df_final.empty:
+            st.markdown("**Previsualización (primeras 15 filas):**")
+            st.dataframe(df_final.head(15), use_container_width=True, hide_index=True)
+else:
+    st.info("ℹ️ No hay datos disponibles para exportar.")
 
 st.divider()
 
