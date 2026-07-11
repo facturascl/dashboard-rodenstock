@@ -177,7 +177,13 @@ def get_subcategorias_completo_mes(ano, mes):
 
 @st.cache_data(ttl=300)
 def get_evolucion_categorias_ano(ano):
-    """Evolución mensual de categorías a lo largo del año."""
+    """Evolución mensual de categorías a lo largo del año.
+    Reagrupa en 4 categorías:
+    - Monofocales: todo Monofocales excepto Polarizado y Fotocromatico
+    - Progresivos: Newton + Newton Plus + Progresivo
+    - Monofocal Polarizado: Monofocales con subcategoría Polarizado
+    - Monofocal Fotocromatico: Monofocales con subcategoría Fotocromatico
+    """
     query = f"""
     WITH facturas_clasif AS (
       SELECT
@@ -189,6 +195,14 @@ def get_evolucion_categorias_ano(ano):
                OR lf.clasificacion_categoria = 'Sin clasificacion' 
                OR TRIM(lf.clasificacion_categoria) = ''
             THEN 'Otros'
+          WHEN lf.clasificacion_categoria = 'Monofocales' 
+               AND COALESCE(lf.clasificacion_subcategoria, '') = 'Polarizado'
+            THEN 'Monofocal Polarizado'
+          WHEN lf.clasificacion_categoria = 'Monofocales' 
+               AND COALESCE(lf.clasificacion_subcategoria, '') = 'Fotocromatico'
+            THEN 'Monofocal Fotocromatico'
+          WHEN lf.clasificacion_categoria IN ('Newton', 'Newton Plus', 'Progresivo')
+            THEN 'Progresivos'
           ELSE lf.clasificacion_categoria
         END AS categoria,
         COALESCE(f.subtotal, 0) + COALESCE(f.iva, 0) AS total_factura
@@ -767,57 +781,56 @@ if not df_subcat.empty:
     df_subcat_vis = df_subcat.copy()
     df_subcat_vis['label_completo'] = df_subcat_vis['categoria'] + ' - ' + df_subcat_vis['subcategoria']
     
-    st.markdown("#### Gráfico Donut - Mes Actual")
+    st.markdown("#### Distribución por Categoría y Subcategoría")
     
-    fig_donut = go.Figure(data=[go.Pie(
-        labels=df_subcat_vis['label_completo'],
-        values=df_subcat_vis['costo'],
-        hole=0.45,
-        textposition='auto',
-        hovertemplate='<b>%{label}</b><br>Total: $%{value:,.0f}<br>%{percent}<extra></extra>',
-        marker=dict(line=dict(color='white', width=3))
-    )])
+    # Color palette for subcategories
+    colores_sub = px.colors.qualitative.Set2 + px.colors.qualitative.Pastel1
+    todas_subcategorias_unicas = sorted(df_subcat_vis['subcategoria'].unique().tolist())
+    color_map = {sub: colores_sub[i % len(colores_sub)] for i, sub in enumerate(todas_subcategorias_unicas)}
     
-    total_mes = df_subcat_vis['costo'].sum()
-    fig_donut.update_layout(
-        title=dict(text=f"{meses_nombres[mes_tab2-1]} {ano_actual}", x=0.5, xanchor='center'),
-        annotations=[dict(
-            text=f'<b>Total</b><br>${total_mes:,.0f}',
-            x=0.5, y=0.5,
-            font_size=14,
-            showarrow=False
-        )],
-        showlegend=True,
-        legend=dict(orientation="v", yanchor="middle", y=0.5, xanchor="left", x=1.02, font=dict(size=9)),
-        height=550
+    # Use full label for multiselect options to avoid duplicate names across different categories
+    todas_opciones = sorted(df_subcat_vis['label_completo'].unique().tolist())
+    subcats_seleccionadas = st.multiselect(
+        "Filtrar subcategorías (vacío = todas)",
+        options=todas_opciones,
+        default=[],
+        key="filtro_subcats_desglose"
     )
     
-    st.plotly_chart(fig_donut, use_container_width=True)
+    if subcats_seleccionadas:
+        df_subcat_filtrado = df_subcat_vis[df_subcat_vis['label_completo'].isin(subcats_seleccionadas)]
+    else:
+        df_subcat_filtrado = df_subcat_vis
     
-    st.divider()
-
-    st.markdown("#### Vista Sunburst - Jerarquía")
+    fig_barras = go.Figure()
     
-    fig_sunburst = px.sunburst(
-        df_subcat_vis,
-        path=['categoria', 'subcategoria'],
-        values='costo',
-        color='costo',
-        color_continuous_scale='Viridis'
+    subcats_a_mostrar = df_subcat_filtrado['subcategoria'].unique()
+    for sub in subcats_a_mostrar:
+        df_sub = df_subcat_filtrado[df_subcat_filtrado['subcategoria'] == sub]
+        fig_barras.add_trace(go.Bar(
+            x=df_sub['categoria'],
+            y=df_sub['cantidad'],
+            name=sub,
+            marker_color=color_map[sub],
+            text=df_sub['cantidad'].apply(lambda x: f"{int(x):,}"),
+            textposition='inside',
+            customdata=df_sub['costo'].values,
+            hovertemplate='<b>%{x}</b><br>Subcategoría: ' + sub + '<br>Cantidad: %{y:,.0f}<br>Total: $%{customdata:,.0f}<extra></extra>'
+        ))
+    
+    total_mes = df_subcat_filtrado['costo'].sum()
+    total_cantidad = int(df_subcat_filtrado['cantidad'].sum())
+    fig_barras.update_layout(
+        barmode='stack',
+        title=dict(text=f"{meses_nombres[mes_tab2-1]} {ano_actual} — {total_cantidad:,} trabajos · ${total_mes:,.0f}", x=0.5, xanchor='center'),
+        xaxis_title="Categoría",
+        yaxis=dict(title="Cantidad de Trabajos"),
+        height=500,
+        showlegend=False,
+        margin=dict(b=50)
     )
     
-    fig_sunburst.update_traces(
-        textinfo='label+percent parent',
-        hovertemplate='<b>%{label}</b><br>Total: $%{value:,.0f}<br>Porcentaje: %{percentParent:.1%}<extra></extra>',
-        marker=dict(line=dict(color='white', width=2))
-    )
-    
-    fig_sunburst.update_layout(
-        title=dict(text='Categorías → Subcategorías', x=0.5, xanchor='center'),
-        height=550
-    )
-    
-    st.plotly_chart(fig_sunburst, use_container_width=True)
+    st.plotly_chart(fig_barras, use_container_width=True)
     
 else:
     st.info("ℹ️ Sin datos de subcategorías")
@@ -885,7 +898,7 @@ if not df_evo_cat.empty:
     
     st.plotly_chart(fig_cat, use_container_width=True)
     
-    st.markdown("#### Resumen por Categoría")
+    st.markdown("#### Resumen Anual por Categoría")
     resumen_cat = df_evo_cat.groupby('categoria').agg({
         'cantidad': 'sum',
         'total_mes': 'sum',
@@ -911,80 +924,12 @@ else:
 
 st.divider()
 
-st.subheader("🏷️ Evolución de Todas las Subcategorías")
+st.subheader("🏷️ Resumen Completo de Subcategorías del Año")
 
 df_evo_subcat = get_evolucion_subcategorias_ano(ano_actual)
 
 if not df_evo_subcat.empty:
-    total_subcats = df_evo_subcat['label'].nunique()
-    st.info(f"📊 Mostrando evolución de **{total_subcats}** subcategorías diferentes")
-    
-    col_filtro1, col_filtro2 = st.columns([3, 9])
-    with col_filtro1:
-        mostrar_top = st.checkbox("Filtrar Top N", value=False, key="filtrar_top_subcat")
-    
-    if mostrar_top:
-        with col_filtro2:
-            top_n = st.slider("Cantidad a mostrar", min_value=5, max_value=50, value=20, step=5)
-        top_subcats_anual = df_evo_subcat.groupby('label')['total_mes'].sum().nlargest(top_n).index.tolist()
-        df_evo_subcat_filtrado = df_evo_subcat[df_evo_subcat['label'].isin(top_subcats_anual)]
-        st.caption(f"Mostrando top {top_n} subcategorías por ingresos totales del año")
-    else:
-        df_evo_subcat_filtrado = df_evo_subcat
-        st.caption("Mostrando todas las subcategorías")
-    
-    df_subcat_pivot_cant = df_evo_subcat_filtrado.pivot_table(
-        index='mes', columns='label', values='cantidad',
-        aggfunc='sum', fill_value=0
-    )
-    df_subcat_pivot_total = df_evo_subcat_filtrado.pivot_table(
-        index='mes', columns='label', values='total_mes',
-        aggfunc='sum', fill_value=0
-    )
-    df_subcat_pivot_promedio = df_evo_subcat_filtrado.pivot_table(
-        index='mes', columns='label', values='promedio_mes',
-        aggfunc='mean', fill_value=0
-    )
-    
-    for mes in range(1, 13):
-        if mes not in df_subcat_pivot_cant.index:
-            df_subcat_pivot_cant.loc[mes] = 0
-        if mes not in df_subcat_pivot_total.index:
-            df_subcat_pivot_total.loc[mes] = 0
-        if mes not in df_subcat_pivot_promedio.index:
-            df_subcat_pivot_promedio.loc[mes] = 0
-    
-    df_subcat_pivot_cant = df_subcat_pivot_cant.sort_index()
-    df_subcat_pivot_total = df_subcat_pivot_total.sort_index()
-    df_subcat_pivot_promedio = df_subcat_pivot_promedio.sort_index()
-    
-    fig_subcat = go.Figure()
-    
-    for col in df_subcat_pivot_cant.columns:
-        customdata = list(zip(df_subcat_pivot_total[col], df_subcat_pivot_promedio[col]))
-        fig_subcat.add_trace(go.Scatter(
-            x=[meses_nombres[m-1] for m in df_subcat_pivot_cant.index],
-            y=df_subcat_pivot_cant[col],
-            name=col,
-            mode='lines+markers',
-            line=dict(width=3),
-            marker=dict(size=8),
-            customdata=customdata,
-            hovertemplate='<b>%{x}</b><br><b>' + col + '</b><br>Cantidad: %{y:,.0f} | Total: $%{customdata[0]:,.0f} | Promedio: $%{customdata[1]:,.0f}<extra></extra>'
-        ))
-    
-    fig_subcat.update_layout(
-        xaxis_title="Mes",
-        yaxis=dict(title="Cantidad de Trabajos"),
-        hovermode='x unified',
-        height=600,
-        showlegend=True,
-        legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02)
-    )
-    
-    st.plotly_chart(fig_subcat, use_container_width=True)
-    
-    st.markdown("#### Resumen Completo de Subcategorías del Año")
+
     resumen_subcat = df_evo_subcat.groupby('label').agg({
         'cantidad': 'sum',
         'total_mes': 'sum',
